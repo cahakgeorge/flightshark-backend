@@ -82,14 +82,20 @@ docker compose up -d
 ### Create Admin User
 
 ```bash
-# Run Django migrations
+# 1. Create Django migrations for app models (first time only)
+docker compose exec admin python manage.py makemigrations destinations content users analytics
+
+# 2. Run Django migrations
 make admin-migrate
 
-# Create a Django admin superuser
+# 3. Create a Django admin superuser
 make admin-superuser
 
-# Or manually:
-docker compose exec admin python manage.py createsuperuser
+# Or create superuser manually with specific credentials:
+docker compose exec admin python manage.py shell -c "
+from django.contrib.auth.models import User
+User.objects.create_superuser('admin', 'admin@tenflux.com', 'admin123')
+"
 ```
 
 ## API Endpoints
@@ -159,6 +165,62 @@ The Django Admin (http://localhost:8001/admin) provides a beautiful, modern inte
 
 ## Development
 
+### Makefile Commands
+
+The `Makefile` provides shortcut commands for common Docker operations. It's a **developer convenience tool** - instead of typing long Docker commands, you use simple shortcuts.
+
+#### Available Commands
+
+| Command | What it does |
+|---------|--------------|
+| `make help` | Show all available commands |
+| `make setup` | Initial setup (copy env, build, start services, migrate) |
+| `make up` | Start all services |
+| `make down` | Stop all services |
+| `make restart` | Restart all services |
+| `make logs` | View all logs |
+| `make logs-api` | View API logs only |
+| `make logs-admin` | View Django admin logs |
+
+#### Database Commands
+
+| Command | What it does |
+|---------|--------------|
+| `make migrate` | Run FastAPI/Alembic migrations |
+| `make admin-migrate` | Run Django migrations |
+| `make db-shell` | Open PostgreSQL shell |
+| `make mongo-shell` | Open MongoDB shell |
+| `make redis-cli` | Open Redis CLI |
+
+#### Development Commands
+
+| Command | What it does |
+|---------|--------------|
+| `make test` | Run all tests |
+| `make lint` | Run linters |
+| `make format` | Format code |
+| `make shell-api` | Shell into API container |
+| `make shell-admin` | Shell into Django container |
+
+#### When to Use the Makefile
+
+| Environment | Use Makefile? | Notes |
+|-------------|---------------|-------|
+| **Local Development** | ✅ Yes | Convenience, speed, standardized commands |
+| **CI/CD Pipelines** | ⚠️ Sometimes | Can use, but often replaced with native CI commands |
+| **Production Servers** | ❌ Rarely | Production uses orchestrators (K8s, ECS) or direct Docker Compose |
+
+#### Production Deployment
+
+In production, you typically bypass the Makefile and use Docker Compose directly with production overrides:
+
+```bash
+# Production deployment (on server)
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+The Makefile is essentially a documented cheat sheet for your project's commands - useful for onboarding new developers and daily development work.
+
 ### Running Tests
 ```bash
 make test
@@ -172,19 +234,39 @@ make format    # Format code
 
 ### Database Migrations
 ```bash
-make migrate              # Run migrations
-make makemigrations msg="Add new field"  # Create migration
+make migrate              # Run FastAPI migrations (Alembic)
+make admin-migrate        # Run Django migrations
+make makemigrations msg="Add new field"  # Create Alembic migration
+make admin-makemigrations # Create Django migrations
 ```
 
 ### Shells
 ```bash
 make shell-api     # Shell into API container
+make shell-admin   # Shell into Django container
 make db-shell      # PostgreSQL shell
 make mongo-shell   # MongoDB shell
 make redis-cli     # Redis CLI
 ```
 
 ## Background Tasks
+
+### How It Works
+
+Background tasks use **Celery** with **RabbitMQ** as the message broker:
+
+```
+┌─────────────────┐         ┌─────────────────┐         ┌─────────────────┐
+│   FastAPI /     │  task   │    RabbitMQ     │  pull   │  Celery Workers │
+│   Django Admin  │ ──────► │  (Task Queue)   │ ◄────── │  (Background)   │
+└─────────────────┘         └─────────────────┘         └─────────────────┘
+```
+
+**Why RabbitMQ instead of Redis for task queue?**
+- ✅ Strong message persistence (tasks won't be lost)
+- ✅ Delivery guarantees (at-least-once delivery)
+- ✅ Priority queues for critical tasks
+- Redis is dedicated to caching, keeping concerns separated
 
 ### Scheduled Tasks (Celery Beat)
 | Task | Schedule | Description |
@@ -205,6 +287,12 @@ docker compose exec worker celery -A celery_app call tasks.flight_prices.update_
 # Monitor tasks (Flower)
 docker compose exec worker celery -A celery_app flower --port=5555
 ```
+
+### RabbitMQ Management
+Access the RabbitMQ dashboard at http://localhost:15672 (guest/guest) to:
+- View active queues and messages
+- Monitor worker connections
+- Debug failed tasks
 
 ## External Integrations
 
