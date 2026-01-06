@@ -1,0 +1,217 @@
+version: '3.8'
+
+services:
+  # ===================
+  # API Services
+  # ===================
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: flightshark-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://flightshark:flightshark_dev@postgres:5432/flightshark
+      - REDIS_URL=redis://redis:6379/0
+      - MONGODB_URL=mongodb://mongo:27017/flightshark
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - DEBUG=true
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8000
+    volumes:
+      - ./api:/app
+      - ./shared:/app/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      mongo:
+        condition: service_started
+    networks:
+      - flightshark-network
+    restart: unless-stopped
+
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+    container_name: flightshark-admin
+    ports:
+      - "8001:8000"
+    environment:
+      - DATABASE_URL=postgresql://flightshark:flightshark_dev@postgres:5432/flightshark
+      - REDIS_URL=redis://redis:6379/1
+      - SECRET_KEY=${DJANGO_SECRET_KEY:-django-dev-secret-key}
+      - DEBUG=true
+      - ALLOWED_HOSTS=localhost,127.0.0.1
+    volumes:
+      - ./admin:/app
+      - ./shared:/app/shared
+      - admin_static:/app/staticfiles
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - flightshark-network
+    restart: unless-stopped
+
+  # ===================
+  # Background Workers
+  # ===================
+  worker:
+    build:
+      context: ./workers
+      dockerfile: Dockerfile
+    container_name: flightshark-worker
+    command: celery -A celery_app worker -l info -c 4
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://flightshark:flightshark_dev@postgres:5432/flightshark
+      - REDIS_URL=redis://redis:6379/0
+      - MONGODB_URL=mongodb://mongo:27017/flightshark
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - AMADEUS_API_KEY=${AMADEUS_API_KEY:-}
+      - AMADEUS_API_SECRET=${AMADEUS_API_SECRET:-}
+    volumes:
+      - ./workers:/app
+      - ./shared:/app/shared
+    depends_on:
+      - redis
+      - rabbitmq
+      - postgres
+      - mongo
+    networks:
+      - flightshark-network
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: ./workers
+      dockerfile: Dockerfile
+    container_name: flightshark-beat
+    command: celery -A celery_app beat -l info
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    volumes:
+      - ./workers:/app
+    depends_on:
+      - redis
+      - rabbitmq
+    networks:
+      - flightshark-network
+    restart: unless-stopped
+
+  # ===================
+  # Databases
+  # ===================
+  postgres:
+    image: timescale/timescaledb:latest-pg15
+    container_name: flightshark-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=flightshark
+      - POSTGRES_USER=flightshark
+      - POSTGRES_PASSWORD=flightshark_dev
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flightshark -d flightshark"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - flightshark-network
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:6
+    container_name: flightshark-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - flightshark-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: flightshark-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - flightshark-network
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: flightshark-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - flightshark-network
+    restart: unless-stopped
+
+  # ===================
+  # Monitoring
+  # ===================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: flightshark-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+    networks:
+      - flightshark-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: flightshark-grafana
+    ports:
+      - "3002:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    networks:
+      - flightshark-network
+    restart: unless-stopped
+
+networks:
+  flightshark-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  mongo_data:
+  redis_data:
+  rabbitmq_data:
+  prometheus_data:
+  grafana_data:
+  admin_static:
+

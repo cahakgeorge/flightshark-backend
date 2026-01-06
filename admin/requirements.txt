@@ -1,0 +1,34 @@
+# Django
+Django==5.0.1
+django-environ==0.11.2
+django-cors-headers==4.3.1
+django-extensions==3.2.3
+
+# Database
+psycopg2-binary==2.9.9
+
+# Admin UI Enhancement
+django-unfold==0.22.0
+django-import-export==3.3.6
+
+# API & Serialization
+djangorestframework==3.14.0
+
+# Caching
+django-redis==5.4.0
+
+# Static Files
+whitenoise==6.6.0
+
+# Security
+django-csp==3.8
+
+# Monitoring
+sentry-sdk==1.39.1
+
+# Utilities
+python-dotenv==1.0.0
+Pillow==10.2.0
+
+# Development
+django-debug-toolbar==4.2.0

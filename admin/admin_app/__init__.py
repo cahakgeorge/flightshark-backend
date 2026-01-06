@@ -1,0 +1,1 @@
+"""Flightshark Admin Application"""

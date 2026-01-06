@@ -1,0 +1,2 @@
+# Migrations for destinations app
+
