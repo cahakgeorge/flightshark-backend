@@ -2,7 +2,7 @@
 Application Configuration - Environment Variables & Settings
 """
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, computed_field
 from typing import List
 from functools import lru_cache
 
@@ -42,10 +42,17 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30)
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7)
     
-    # CORS
-    ALLOWED_ORIGINS: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:8000"]
+    # CORS - stored as comma-separated string
+    ALLOWED_ORIGINS_STR: str = Field(
+        default="http://localhost:3000,http://localhost:8000",
+        alias="ALLOWED_ORIGINS"
     )
+    
+    @computed_field
+    @property
+    def ALLOWED_ORIGINS(self) -> List[str]:
+        """Parse comma-separated origins into list"""
+        return [origin.strip() for origin in self.ALLOWED_ORIGINS_STR.split(',') if origin.strip()]
     
     # Flight APIs
     AMADEUS_API_KEY: str = Field(default="")

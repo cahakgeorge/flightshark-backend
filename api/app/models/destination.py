@@ -23,7 +23,7 @@ class Destination(Base):
     average_price = Column(Numeric(10, 2))  # Average flight price from major hubs
     
     image_url = Column(Text)
-    metadata = Column(JSON, default=dict)  # Flexible additional data
+    extra_data = Column(JSON, default=dict)  # Flexible additional data (metadata is reserved)
     
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
