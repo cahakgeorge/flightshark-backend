@@ -35,6 +35,7 @@ Backend services for Flightshark - a flight search and group trip planning platf
 
 | Service | Port | Description |
 |---------|------|-------------|
+| **nginx** | 80, 443 | Load balancer & reverse proxy (optional in dev) |
 | **api** | 8000 | FastAPI - Main API service |
 | **admin** | 8001 | Django Admin - Content management |
 | **worker** | - | Celery workers for background tasks |
@@ -329,6 +330,71 @@ AMADEUS_API_SECRET=...
 SENDGRID_API_KEY=...
 ```
 
+## Load Balancer (Nginx)
+
+The project includes a production-ready Nginx configuration for:
+- **Load balancing** across multiple API instances
+- **SSL termination** (HTTPS)
+- **Rate limiting** (30 req/s general, 10 req/s for searches)
+- **Security headers**
+- **Gzip compression**
+- **WebSocket support**
+
+### Development (without Nginx)
+
+By default, services are accessed directly:
+```bash
+make up
+# API: http://localhost:8000
+# Admin: http://localhost:8001
+```
+
+### Development (with Nginx)
+
+To test Nginx locally:
+```bash
+docker compose --profile with-nginx up -d
+# All traffic: http://localhost (port 80)
+# Admin: http://localhost:8080
+```
+
+### Production (with Nginx + SSL)
+
+1. **Get SSL certificates** (Let's Encrypt):
+```bash
+certbot certonly --standalone -d api.flightshark.com -d admin.flightshark.com
+cp /etc/letsencrypt/live/api.flightshark.com/* infrastructure/nginx/certs/
+```
+
+2. **Enable SSL** in `infrastructure/nginx/nginx.conf`:
+   - Uncomment the `listen 443 ssl` lines
+   - Uncomment the `ssl_certificate` lines
+
+3. **Deploy**:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+### Scaling API Horizontally
+
+Edit `docker-compose.prod.yml` to add more API instances:
+```yaml
+api-2:
+  extends:
+    service: api
+  container_name: flightshark-api-2
+```
+
+Then update `nginx.conf` upstream:
+```nginx
+upstream api_servers {
+    least_conn;
+    server api:8000;
+    server api-2:8000;
+    server api-3:8000;
+}
+```
+
 ## Deployment
 
 ### Digital Ocean (Docker Compose)
@@ -346,6 +412,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 - Redis → ElastiCache
 - MongoDB → MongoDB Atlas or DocumentDB
 - Containers → ECS or EKS
+- Nginx → Application Load Balancer (ALB)
 
 ## License
 

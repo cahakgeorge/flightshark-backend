@@ -1,0 +1,144 @@
+# Production Docker Compose Overrides
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+version: '3.8'
+
+services:
+  # ===================
+  # Nginx - Production Config
+  # ===================
+  nginx:
+    profiles: []  # Enable by default in production
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infrastructure/nginx/certs:/etc/nginx/certs:ro
+      - admin_static:/app/staticfiles:ro
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===================
+  # API - Production Settings
+  # ===================
+  api:
+    ports: []  # Don't expose directly, only through nginx
+    environment:
+      - DEBUG=false
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+    volumes:
+      - ./api/app:/app/app:ro  # Read-only in production
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    restart: always
+
+  # Scale API horizontally (uncomment for multiple instances)
+  # api-2:
+  #   extends:
+  #     service: api
+  #   container_name: flightshark-api-2
+
+  # api-3:
+  #   extends:
+  #     service: api
+  #   container_name: flightshark-api-3
+
+  # ===================
+  # Admin - Production Settings
+  # ===================
+  admin:
+    ports: []  # Don't expose directly
+    environment:
+      - DEBUG=false
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+      - SECRET_KEY=${DJANGO_SECRET_KEY}
+      - ALLOWED_HOSTS=${ADMIN_ALLOWED_HOSTS}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+    volumes:
+      - ./admin:/app:ro
+      - admin_static:/app/staticfiles
+      - admin_media:/app/media
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    restart: always
+
+  # ===================
+  # Workers - Production Settings
+  # ===================
+  worker:
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+      - AMADEUS_API_KEY=${AMADEUS_API_KEY}
+      - AMADEUS_API_SECRET=${AMADEUS_API_SECRET}
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY:-}
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+    restart: always
+
+  beat:
+    restart: always
+
+  # ===================
+  # Databases - Production Settings
+  # ===================
+  postgres:
+    ports: []  # Don't expose externally
+    environment:
+      - POSTGRES_DB=${DB_NAME}
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  mongo:
+    ports: []  # Don't expose externally
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER:-}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD:-}
+
+  redis:
+    ports: []  # Don't expose externally
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:-}
+
+  rabbitmq:
+    ports:
+      - "15672:15672"  # Only management UI (consider removing in production)
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-flightshark}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD}
+
+  # ===================
+  # Monitoring - Production Settings
+  # ===================
+  prometheus:
+    ports: []  # Access through nginx or VPN only
+
+  grafana:
+    ports: []  # Access through nginx or VPN only
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_SERVER_ROOT_URL=https://monitoring.flightshark.com
+      - GF_USERS_ALLOW_SIGN_UP=false
+
+volumes:
+  admin_media:
+

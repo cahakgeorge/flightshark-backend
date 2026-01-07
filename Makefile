@@ -152,11 +152,33 @@ admin-collectstatic:
 admin-shell:
 	docker compose exec admin python manage.py shell_plus
 
-# Production build
+# ===================
+# Nginx / Load Balancer
+# ===================
+up-with-nginx:
+	docker compose --profile with-nginx up -d
+
+nginx-reload:
+	docker compose exec nginx nginx -s reload
+
+nginx-test:
+	docker compose exec nginx nginx -t
+
+nginx-logs:
+	docker compose logs -f nginx
+
+# ===================
+# Production
+# ===================
 build-prod:
 	docker compose -f docker-compose.yml -f docker-compose.prod.yml build
 
-# Production up
 up-prod:
 	docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+down-prod:
+	docker compose -f docker-compose.yml -f docker-compose.prod.yml down
+
+logs-prod:
+	docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f
 

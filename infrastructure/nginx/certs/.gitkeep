@@ -1,0 +1,9 @@
+# Place SSL certificates here:
+# - fullchain.pem (certificate + intermediate)
+# - privkey.pem (private key)
+#
+# For Let's Encrypt, use certbot:
+# certbot certonly --standalone -d api.flightshark.com -d admin.flightshark.com
+#
+# Or use the certbot Docker container for auto-renewal
+
