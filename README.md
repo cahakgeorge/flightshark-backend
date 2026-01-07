@@ -134,35 +134,176 @@ GET  /destinations/{code}/social - Social media content
 GET  /destinations/trending/   - Trending destinations
 ```
 
+### Airports
+```
+GET  /airports/search?q=dublin - Search airports (autocomplete)
+GET  /airports/{code}          - Get airport by IATA code
+GET  /airports/city/{name}     - All airports in a city
+GET  /airports/popular/        - List major airports
+```
+
+### Airlines
+```
+GET  /airlines/                - List all airlines
+GET  /airlines/{code}          - Get airline by IATA code
+GET  /airlines/{code}/routes   - Get airline's routes
+GET  /airlines/routes/search   - Find airlines on a route
+```
+
+## Database Schema
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        REFERENCE DATA                                │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐      │
+│  │ airports │    │ airlines │    │ aircraft │    │  routes  │      │
+│  │ (DUB,BCN)│    │ (FR,BA)  │    │ (738,320)│    │(DUB→BCN) │      │
+│  └──────────┘    └──────────┘    └──────────┘    └──────────┘      │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         USER DATA                                    │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐      │
+│  │  users   │───►│  trips   │───►│ members  │    │  alerts  │      │
+│  └──────────┘    └──────────┘    └──────────┘    └──────────┘      │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                     TIME-SERIES (TimescaleDB)                        │
+│  ┌────────────────────────────────────────────────────────────┐    │
+│  │  price_history: time | DUB→BCN | Ryanair | €49 | amadeus   │    │
+│  └────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         ANALYTICS                                    │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐      │
+│  │ searches │    │ popular  │    │conversion│    │  daily   │      │
+│  │   logs   │    │  routes  │    │  events  │    │ metrics  │      │
+│  └──────────┘    └──────────┘    └──────────┘    └──────────┘      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Reference Data (PostgreSQL)
+
+| Table | Description | Key Fields |
+|-------|-------------|------------|
+| **airports** | Airport reference data | `iata_code`, `city`, `country`, `lat/long`, `is_major` |
+| **airlines** | Airline information | `iata_code`, `name`, `logo_url`, `alliance`, `is_low_cost` |
+| **aircraft** | Aircraft types | `iata_code`, `name`, `manufacturer`, `typical_seats` |
+| **routes** | Known flight routes | `origin_code`, `destination_code`, `airline_code`, `typical_price` |
+| **destinations** | Curated city info | `airport_code`, `description`, `tags`, `highlights` |
+
+### User Data (PostgreSQL)
+
+| Table | Description | Key Fields |
+|-------|-------------|------------|
+| **users** | Registered users | `email`, `home_city`, `preferences` |
+| **trips** | Group trips | `owner_id`, `destination_code`, `dates`, `status` |
+| **trip_members** | Trip participants | `trip_id`, `user_id`, `origin_city`, `role` |
+| **price_alerts** | Price notifications | `user_id`, `route`, `target_price`, `is_active` |
+
+### Time-Series Data (PostgreSQL + TimescaleDB)
+
+| Table | Description | Key Fields |
+|-------|-------------|------------|
+| **price_history** | Historical flight prices | `time`, `origin`, `destination`, `airline`, `price` |
+| **price_daily_avg** | Aggregated daily prices | Auto-generated continuous aggregate |
+
+### Analytics (PostgreSQL)
+
+| Table | Description | Key Fields |
+|-------|-------------|------------|
+| **search_logs** | All flight searches | `origin`, `destination`, `results_count`, `response_time` |
+| **popular_routes** | Trending routes | `route`, `search_count`, `rank`, `period` |
+| **conversion_events** | Funnel tracking | `event_type`, `route`, `affiliate` |
+| **daily_metrics** | Business metrics | `date`, `searches`, `users`, `revenue` |
+
+### Scraped Content (MongoDB)
+
+| Collection | Description |
+|------------|-------------|
+| **social_content** | TikTok/Twitter/Instagram posts |
+| **flight_cache** | Cached flight search results |
+| **destination_insights** | AI-generated insights |
+
+### Seeded Data
+
+The database is pre-seeded with:
+- **30 major European airports** (DUB, LHR, BCN, CDG, etc.)
+- **15 airlines** (Ryanair, BA, Lufthansa, easyJet, etc.)
+- **14 sample routes** with typical pricing
+- **11 aircraft types** (737, A320, 787, etc.)
+- **30 days of mock price history**
+
 ## Django Admin Panel
 
 The Django Admin (http://localhost:8001/admin) provides a beautiful, modern interface for managing:
 
-### Content Management
+### Reference Data Management 🌐
+Manage all the core reference data that powers the platform:
+
+| Section | What You Can Do |
+|---------|-----------------|
+| **Airports** | Add/edit airports, IATA/ICAO codes, coordinates, mark as major |
+| **Airlines** | Manage airlines, logos, alliances, hub airports, ratings |
+| **Routes** | Define flight routes, durations, typical prices, seasonal info |
+| **Aircraft** | Aircraft types, manufacturers, seat counts |
+
+### Destination Content 📍
 - **Destinations** - Add/edit cities, descriptions, tags, images
 - **Destination Tags** - Manage tag categories (sunny, adventure, party, etc.)
 - **Best Booking Times** - Historical data about optimal booking windows
 - **Social Content** - Moderate scraped TikTok/Twitter/Instagram content
 - **Content Curations** - Create featured content collections
 
-### User & Trip Management
+### User & Trip Management 👥
 - **Flightshark Users** - View and manage registered users
 - **Trips** - View all trips, members, and statuses
 - **Price Alerts** - Monitor and manage user alerts
 - **Emergency Contacts** - View notification contacts
 
-### Analytics Dashboard
+### Analytics Dashboard 📊
 - **Search Logs** - All flight searches with performance metrics
 - **Popular Routes** - Trending routes with rankings
 - **Conversion Events** - Funnel tracking data
 - **Daily Metrics** - Aggregated business metrics
 
-### Features
-- Import/Export destinations via CSV/Excel
-- Bulk actions (approve content, activate users, etc.)
+### Features ✨
+- **Import/Export** airports, airlines, routes via CSV/Excel
+- **Bulk actions** (mark airports as major, activate airlines, etc.)
 - Beautiful Unfold theme with Material icons
 - Advanced filtering and search
 - Mobile-responsive design
+
+### Adding New Reference Data
+
+**Add a new airport:**
+1. Go to Admin → Airports → Add Airport
+2. Enter IATA code (e.g., `SFO`), name, city, country
+3. Set coordinates for map display
+4. Mark as "Major" for popular airports
+
+**Add a new airline:**
+1. Go to Admin → Airlines → Add Airline
+2. Enter IATA code (e.g., `UA`), name, country
+3. Add logo URL from `logo.clearbit.com/airline.com`
+4. Set alliance and type (low-cost, charter, etc.)
+
+**Add a new route:**
+1. Go to Admin → Routes → Add Route
+2. Enter origin/destination airport codes
+3. Set typical duration, distance, and price range
+4. Mark as seasonal if applicable
+
+**Bulk import airports/airlines:**
+1. Go to Admin → Airports or Airlines
+2. Click "Import" button
+3. Upload CSV with columns matching the model fields
+4. Review and confirm import
 
 ## Development
 
