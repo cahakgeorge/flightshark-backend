@@ -4,11 +4,27 @@ Flightshark API - Main Application Entry Point
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import ORJSONResponse, Response
 import time
 import logging
 
+# Prometheus metrics
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST, REGISTRY
+
 from app.config import settings
+
+# Define Prometheus metrics
+REQUEST_COUNT = Counter(
+    'http_requests_total',
+    'Total HTTP requests',
+    ['method', 'endpoint', 'status']
+)
+
+REQUEST_LATENCY = Histogram(
+    'http_request_duration_seconds',
+    'HTTP request latency in seconds',
+    ['method', 'endpoint']
+)
 from app.routers import auth, flights, trips, destinations, users, health, airports, airlines
 from app.utils.database import init_db, close_db
 from app.utils.redis import init_redis, close_redis
@@ -85,12 +101,22 @@ app.add_middleware(
 )
 
 
-# Request timing middleware
+# Request timing middleware with Prometheus metrics
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
     start_time = time.time()
     response = await call_next(request)
     process_time = time.time() - start_time
+    
+    # Record metrics (skip /metrics endpoint to avoid recursion)
+    if request.url.path != "/metrics":
+        endpoint = request.url.path
+        method = request.method
+        status = response.status_code
+        
+        REQUEST_COUNT.labels(method=method, endpoint=endpoint, status=status).inc()
+        REQUEST_LATENCY.labels(method=method, endpoint=endpoint).observe(process_time)
+    
     response.headers["X-Process-Time"] = str(process_time)
     return response
 
@@ -115,4 +141,13 @@ async def root():
         "status": "running",
         "docs": "/docs" if settings.DEBUG else "disabled",
     }
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics():
+    """Prometheus metrics endpoint"""
+    return Response(
+        content=generate_latest(REGISTRY),
+        media_type=CONTENT_TYPE_LATEST
+    )
 

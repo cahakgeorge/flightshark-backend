@@ -40,7 +40,7 @@ services:
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
       - DEBUG=true
-      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8000
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:8000,http://127.0.0.1:3000,http://127.0.0.1:3001
     volumes:
       - ./api:/app
       - ./shared:/app/shared
@@ -220,6 +220,36 @@ services:
       - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
+      - loki
+    networks:
+      - flightshark-network
+    restart: unless-stopped
+
+  # ===================
+  # Log Aggregation
+  # ===================
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: flightshark-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./infrastructure/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - flightshark-network
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: flightshark-promtail
+    volumes:
+      - ./infrastructure/loki/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
     networks:
       - flightshark-network
     restart: unless-stopped
@@ -235,5 +265,6 @@ volumes:
   rabbitmq_data:
   prometheus_data:
   grafana_data:
+  loki_data:
   admin_static:
 

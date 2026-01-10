@@ -46,6 +46,8 @@ Backend services for Flightshark - a flight search and group trip planning platf
 | **rabbitmq** | 5672, 15672 | Message broker |
 | **prometheus** | 9090 | Metrics collection |
 | **grafana** | 3002 | Dashboards and visualization |
+| **loki** | 3100 | Log aggregation |
+| **promtail** | - | Log collector (scrapes Docker logs) |
 
 ## Quick Start
 
@@ -79,6 +81,7 @@ docker compose up -d
 - **Admin Panel**: http://localhost:8001/admin
 - **RabbitMQ Management**: http://localhost:15672 (guest/guest)
 - **Grafana**: http://localhost:3002 (admin/admin)
+- **Prometheus** http://localhost:9090
 
 ### Create Admin User
 
@@ -536,6 +539,176 @@ upstream api_servers {
 }
 ```
 
+## Monitoring & Observability
+
+The backend includes a full observability stack:
+- **Prometheus** - Metrics collection
+- **Grafana** - Dashboards and visualization  
+- **Loki** - Log aggregation
+- **Promtail** - Log collector
+
+### Access Points
+
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| Grafana | http://localhost:3002 | admin / admin |
+| Prometheus | http://localhost:9090 | - |
+| Loki | http://localhost:3100 | - |
+
+### Viewing Logs in Grafana (Loki)
+
+1. **Open Grafana**: http://localhost:3002
+2. **Navigate to Explore**: Click the compass icon in the left sidebar
+3. **Select Loki**: Choose "Loki" from the data source dropdown
+4. **Run LogQL queries**:
+
+```logql
+# All API service logs
+{service="api"}
+
+# Filter for errors
+{service="api"} |= "ERROR"
+
+# Filter for specific endpoint
+{service="api"} |= "register"
+
+# All Django admin logs
+{service="admin"}
+
+# Filter by log level
+{service="api"} | json | level="error"
+
+# Search across all services
+{job="docker"} |= "exception"
+```
+
+#### Create a Logs Dashboard Panel
+
+1. Go to **Dashboards** → **New** → **New Dashboard**
+2. Click **"Add visualization"**
+3. Select **Loki** as the data source
+4. Enter your LogQL query
+5. Choose **"Logs"** visualization type
+6. Configure:
+   - **Time** field for timestamp
+   - Enable **"Wrap lines"** for readability
+   - Set appropriate **deduplication** if needed
+7. Click **"Apply"**
+
+### Viewing Metrics in Grafana (Prometheus)
+
+1. **Open Grafana**: http://localhost:3002
+2. **Navigate to Explore**: Click the compass icon
+3. **Select Prometheus**: Choose "Prometheus" from the dropdown
+4. **Run PromQL queries**:
+
+```promql
+# Total HTTP requests
+http_requests_total
+
+# Requests per second (rate over 5 minutes)
+rate(http_requests_total[5m])
+
+# Request latency (95th percentile)
+histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+
+# Requests grouped by endpoint
+sum by (endpoint) (http_requests_total)
+
+# Requests grouped by status code
+sum by (status) (http_requests_total)
+
+# Error rate (5xx responses)
+sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))
+
+# Average response time
+rate(http_request_duration_seconds_sum[5m]) / rate(http_request_duration_seconds_count[5m])
+```
+
+#### Create a Metrics Dashboard Panel
+
+1. Go to **Dashboards** → **New** → **New Dashboard**
+2. Click **"Add visualization"**
+3. Select **Prometheus** as the data source
+4. Enter your PromQL query
+5. Choose visualization type:
+   - **Time series** - For trends over time
+   - **Stat** - For single current values
+   - **Gauge** - For values with thresholds
+   - **Bar chart** - For comparing categories
+6. Configure panel options:
+   - Set **title** and **description**
+   - Configure **legend** and **axes**
+   - Add **thresholds** for alerts
+7. Click **"Apply"**
+
+### Useful Pre-built Queries
+
+#### API Performance Dashboard
+
+| Panel Name | Query | Visualization |
+|------------|-------|---------------|
+| Requests/sec | `rate(http_requests_total[1m])` | Time series |
+| Error Rate % | `sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) * 100` | Gauge |
+| P95 Latency | `histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))` | Time series |
+| Requests by Endpoint | `sum by (endpoint) (increase(http_requests_total[1h]))` | Bar chart |
+
+#### System Health Dashboard
+
+| Panel Name | Query | Visualization |
+|------------|-------|---------------|
+| API Logs | `{service="api"}` (Loki) | Logs |
+| Error Logs | `{service="api"} |= "ERROR"` (Loki) | Logs |
+| Active Targets | `up` | Stat |
+
+### Prometheus Direct Access
+
+Access Prometheus UI directly at http://localhost:9090:
+
+1. **Targets**: Check which services are being scraped
+   - Go to Status → Targets
+   - Verify `flightshark-api` shows "UP"
+
+2. **Graph**: Run queries interactively
+   - Enter query in expression box
+   - Click "Execute"
+   - Switch between "Table" and "Graph" views
+
+3. **Alerts**: View configured alert rules
+   - Go to Alerts tab
+
+### Troubleshooting
+
+**Logs not appearing in Loki?**
+```bash
+# Check Promtail is running
+docker compose ps promtail
+
+# View Promtail logs
+docker compose logs promtail --tail=50
+
+# Verify Loki is receiving data
+curl -s "http://localhost:3100/loki/api/v1/labels"
+```
+
+**Metrics not appearing in Prometheus?**
+```bash
+# Check Prometheus targets
+curl -s http://localhost:9090/api/v1/targets | jq '.data.activeTargets[] | {job: .labels.job, health: .health}'
+
+# Verify API exposes metrics
+curl -s http://localhost:8000/metrics | head -20
+```
+
+**Grafana can't connect to data sources?**
+```bash
+# Restart Grafana to reload provisioned datasources
+docker compose restart grafana
+
+# Check datasource configuration
+cat infrastructure/grafana/provisioning/datasources/datasources.yml
+```
+
 ## Deployment
 
 ### Digital Ocean (Docker Compose)
@@ -558,4 +731,5 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ## License
 
 Proprietary - Tenflux Limited
+
 
