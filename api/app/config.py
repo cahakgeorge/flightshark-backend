@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     
     # JWT Authentication
     JWT_ALGORITHM: str = Field(default="HS256")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=1440)
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7)
     
     # CORS - stored as comma-separated string
