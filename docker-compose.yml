@@ -183,6 +183,8 @@ services:
       - "9121:9121"
     depends_on:
       - redis
+    networks:
+      - flightshark-network
 
   rabbitmq:
     image: rabbitmq:3-management

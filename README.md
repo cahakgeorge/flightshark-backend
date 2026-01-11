@@ -102,6 +102,110 @@ User.objects.create_superuser('admin', 'admin@tenflux.com', 'admin123')
 "
 ```
 
+## Bootstrapping & Data Flow
+
+This section explains the complete setup flow and which service handles what.
+
+### Bootstrap Sequence
+
+```
+1. docker compose up -d
+   │
+   ├─► PostgreSQL starts
+   │   └─► Runs init.sql (creates tables, TimescaleDB, seed data)
+   │
+   ├─► Redis, MongoDB, RabbitMQ start
+   │
+   ├─► FastAPI (api) starts
+   │   └─► Connects to all databases
+   │   └─► Exposes REST API on :8000
+   │
+   ├─► Django Admin starts
+   │   └─► Requires: make admin-migrate (first time)
+   │   └─► Requires: make admin-superuser (first time)
+   │
+   └─► Celery Worker/Beat start
+       └─► Connects to RabbitMQ for task queue
+       └─► Scheduled tasks begin (price updates, scraping)
+```
+
+### Data Initialization Responsibilities
+
+| What | Service | Command/Trigger |
+|------|---------|-----------------|
+| **Core DB Schema** | PostgreSQL | Auto on startup (`init.sql`) |
+| **TimescaleDB Setup** | PostgreSQL | Auto on startup (`init.sql`) |
+| **Initial Airlines/Airports** | PostgreSQL | Auto on startup (`init.sql` seeds ~30) |
+| **Django Auth Tables** | Django Admin | `make admin-migrate` |
+| **Django App Tables** | Django Admin | `make admin-migrate` |
+| **Bulk Reference Data** | FastAPI | `POST /admin/data/seed/openflights` |
+| **Price Data** | Celery | Scheduled or `POST /admin/data/seed/popular-routes` |
+
+### First-Time Setup (Complete Bootstrap)
+
+```bash
+# 1. Start all services
+docker compose up -d
+
+# 2. Wait for PostgreSQL to be healthy (~30 seconds)
+docker compose logs postgres | tail -5
+
+# 3. Run Django migrations (creates admin tables)
+make admin-migrate
+
+# 4. Create Django admin user
+docker compose exec admin python manage.py shell -c "
+from django.contrib.auth.models import User
+User.objects.create_superuser('admin', 'admin@tenflux.com', 'admin123')
+"
+
+# 5. Seed reference data (airports, airlines, routes)
+curl -X POST "http://localhost:8000/admin/data/seed/openflights?include_airports=true&include_airlines=true&include_routes=true"
+
+# 6. Check seeding progress (~90 seconds for full seed)
+curl "http://localhost:8000/admin/data/sync-status?limit=1"
+
+# 7. Verify data (should show 144 destinations for Dublin)
+curl "http://localhost:8000/admin/data/airport-destinations/DUB" | jq '.destinations_count'
+```
+
+### What Each Service Owns
+
+| Service | Owns | Responsibilities |
+|---------|------|------------------|
+| **PostgreSQL** | Schema, core data | User accounts, trips, airports, airlines, routes, price history |
+| **FastAPI (api)** | REST API, data seeding | All `/api/*` endpoints, search, auth, seeding endpoints |
+| **Django Admin** | Content management | Admin UI, destination content, analytics dashboards |
+| **Celery Workers** | Background jobs | Price updates, social scraping, notifications |
+| **Celery Beat** | Scheduling | Triggers periodic tasks (every 15min, hourly, daily) |
+| **MongoDB** | Scraped content | TikTok/Twitter/Instagram content, flight cache |
+| **Redis** | Caching, sessions | Flight search cache, rate limiting, session storage |
+| **RabbitMQ** | Task queue | Job distribution to Celery workers |
+
+### Database Schema Management
+
+| Database | Schema Management | Migration Command |
+|----------|-------------------|-------------------|
+| PostgreSQL (FastAPI models) | `init.sql` + manual | Direct SQL or Alembic |
+| PostgreSQL (Django models) | Django ORM | `make admin-migrate` |
+| MongoDB | Schemaless | Auto-created on insert |
+
+### Verify Installation
+
+```bash
+# Check all services are running
+docker compose ps
+
+# Test API health
+curl http://localhost:8000/health
+
+# Test database connection
+curl http://localhost:8000/ | jq '.database'
+
+# Check data counts
+curl "http://localhost:8000/airports/search?q=dublin" | jq '.[0]'
+```
+
 ## API Endpoints
 
 ### Authentication
