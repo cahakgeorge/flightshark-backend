@@ -36,7 +36,10 @@ class FlightOffer(BaseModel):
     is_direct: bool
     
     booking_url: Optional[str] = None
-    source: str  # "amadeus", "skyscanner", etc.
+    source: str  # "amadeus", "skyscanner", "kiwi", etc.
+    
+    # Kiwi-specific: virtual interlining connects flights on different airlines
+    virtual_interlining: bool = False
     
     class Config:
         from_attributes = True

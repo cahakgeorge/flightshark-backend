@@ -54,14 +54,28 @@ class Settings(BaseSettings):
         """Parse comma-separated origins into list"""
         return [origin.strip() for origin in self.ALLOWED_ORIGINS_STR.split(',') if origin.strip()]
     
-    # Flight APIs
+    # Flight APIs - Primary: Amadeus
     AMADEUS_API_KEY: str = Field(default="")
     AMADEUS_API_SECRET: str = Field(default="")
-    # Use test.api.amadeus.com for sandbox/free tier, api.amadeus.com for production
-    AMADEUS_BASE_URL: str = Field(default="https://test.api.amadeus.com/v2")
+    # Use True for sandbox/test API, False for production API
+    AMADEUS_USE_TEST_API: bool = Field(default=True)
     
+    @computed_field
+    @property
+    def AMADEUS_BASE_URL(self) -> str:
+        """Get Amadeus API base URL based on environment"""
+        if self.AMADEUS_USE_TEST_API:
+            return "https://test.api.amadeus.com/v2"
+        return "https://api.amadeus.com/v2"
+    
+    # Flight APIs - Secondary: Skyscanner (via RapidAPI)
     SKYSCANNER_API_KEY: str = Field(default="")
+    
+    # Flight APIs - Tertiary: Kiwi.com (Tequila API)
     KIWI_API_KEY: str = Field(default="")
+    
+    # Flight search strategy: "fallback", "parallel", "best_price"
+    FLIGHT_SEARCH_STRATEGY: str = Field(default="fallback")
     
     # Social Media
     TWITTER_BEARER_TOKEN: str = Field(default="")

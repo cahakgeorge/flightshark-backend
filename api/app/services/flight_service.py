@@ -2,25 +2,27 @@
 Flight Search Service - Aggregates results from multiple providers
 """
 from typing import List, Optional
-from datetime import date, datetime
-import httpx
+from datetime import date
 import logging
-from tenacity import retry, stop_after_attempt, wait_exponential
 
-from app.config import settings
-from app.schemas.flight import FlightOffer, FlightSegment
+from app.schemas.flight import FlightOffer
+from app.services.providers import ProviderManager, provider_manager
 
 logger = logging.getLogger(__name__)
 
 
 class FlightService:
     """
-    Service for searching flights across multiple providers
+    Service for searching flights across multiple providers with automatic failover.
+    
+    Supports multiple search strategies:
+    - fallback: Try providers in priority order (fastest, best for single results)
+    - parallel: Search all providers at once (widest selection)
+    - best_price: Search all, deduplicate by cheapest (best value)
     """
     
-    def __init__(self):
-        self.amadeus_token: Optional[str] = None
-        self.amadeus_token_expiry: Optional[datetime] = None
+    def __init__(self, manager: Optional[ProviderManager] = None):
+        self.manager = manager or provider_manager
     
     async def search_flights(
         self,
@@ -31,267 +33,114 @@ class FlightService:
         passengers: int = 1,
         cabin_class: str = "economy",
         direct_only: bool = False,
+        strategy: str = "fallback",
     ) -> List[FlightOffer]:
         """
-        Search for flights across all configured providers
+        Search for flights across all configured providers.
+        
+        Args:
+            origin: Origin airport IATA code (e.g., "DUB")
+            destination: Destination airport IATA code (e.g., "BCN")
+            departure_date: Departure date
+            return_date: Return date (optional for one-way)
+            passengers: Number of passengers
+            cabin_class: Cabin class (economy, premium_economy, business, first)
+            direct_only: Filter to direct flights only
+            strategy: Search strategy ("fallback", "parallel", "best_price")
+        
+        Returns:
+            List of flight offers sorted by price
         """
-        all_offers = []
+        logger.info(
+            f"Searching flights: {origin} -> {destination}, "
+            f"date: {departure_date}, passengers: {passengers}, "
+            f"strategy: {strategy}"
+        )
         
-        # Try Amadeus first
-        if settings.AMADEUS_API_KEY:
-            try:
-                amadeus_offers = await self._search_amadeus(
-                    origin, destination, departure_date, return_date, passengers, cabin_class
-                )
-                all_offers.extend(amadeus_offers)
-                logger.info(f"Amadeus returned {len(amadeus_offers)} offers")
-            except Exception as e:
-                logger.error(f"Amadeus search failed: {e}")
-        
-        # If no real API keys, return mock data
-        if not all_offers:
-            logger.info("Using mock flight data")
-            all_offers = self._generate_mock_offers(
-                origin, destination, departure_date, return_date, passengers
-            )
+        # Search using provider manager
+        offers = await self.manager.search(
+            origin=origin,
+            destination=destination,
+            departure_date=departure_date,
+            return_date=return_date,
+            passengers=passengers,
+            cabin_class=cabin_class,
+            strategy=strategy,
+        )
         
         # Filter direct flights if requested
         if direct_only:
-            all_offers = [o for o in all_offers if o.is_direct]
+            offers = [o for o in offers if o.is_direct]
         
-        # Sort by price
-        all_offers.sort(key=lambda x: x.price)
-        
-        return all_offers
+        logger.info(f"Found {len(offers)} flight offers")
+        return offers
     
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    async def _get_amadeus_token(self) -> str:
-        """Get Amadeus API access token"""
-        if self.amadeus_token and self.amadeus_token_expiry and datetime.utcnow() < self.amadeus_token_expiry:
-            return self.amadeus_token
-        
-        # Use the same base URL (test vs production) for auth
-        auth_url = settings.AMADEUS_BASE_URL.replace("/v2", "/v1/security/oauth2/token")
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                auth_url,
-                data={
-                    "grant_type": "client_credentials",
-                    "client_id": settings.AMADEUS_API_KEY,
-                    "client_secret": settings.AMADEUS_API_SECRET,
-                }
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            self.amadeus_token = data["access_token"]
-            # Token expires in `expires_in` seconds, refresh 60s early
-            from datetime import timedelta
-            self.amadeus_token_expiry = datetime.utcnow() + timedelta(seconds=data["expires_in"] - 60)
-            
-            return self.amadeus_token
-    
-    async def _search_amadeus(
+    async def search_multi_city(
         self,
-        origin: str,
-        destination: str,
-        departure_date: date,
-        return_date: Optional[date],
-        passengers: int,
-        cabin_class: str,
+        routes: List[dict],
+        passengers: int = 1,
     ) -> List[FlightOffer]:
-        """Search flights using Amadeus API"""
-        token = await self._get_amadeus_token()
+        """
+        Search for multi-city itineraries.
         
-        params = {
-            "originLocationCode": origin,
-            "destinationLocationCode": destination,
-            "departureDate": departure_date.isoformat(),
-            "adults": passengers,
-            "currencyCode": "EUR",
-            "max": 50,
-        }
+        Uses Kiwi provider which specializes in complex itineraries.
         
-        if return_date:
-            params["returnDate"] = return_date.isoformat()
+        Args:
+            routes: List of route dicts with "from", "to", "date" keys
+            passengers: Number of passengers
         
-        cabin_map = {
-            "economy": "ECONOMY",
-            "premium_economy": "PREMIUM_ECONOMY",
-            "business": "BUSINESS",
-            "first": "FIRST",
-        }
-        params["travelClass"] = cabin_map.get(cabin_class, "ECONOMY")
+        Returns:
+            List of flight offers for the complete multi-city trip
+        """
+        kiwi = self.manager.get_provider("kiwi")
         
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{settings.AMADEUS_BASE_URL}/shopping/flight-offers",
-                params=params,
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            data = response.json()
-        
-        return self._parse_amadeus_response(data)
-    
-    def _parse_amadeus_response(self, data: dict) -> List[FlightOffer]:
-        """Parse Amadeus API response into FlightOffer objects"""
-        offers = []
-        
-        for offer_data in data.get("data", []):
+        if kiwi and kiwi.is_configured and kiwi.is_available:
             try:
-                itineraries = offer_data.get("itineraries", [])
-                if not itineraries:
-                    continue
-                
-                # Parse outbound
-                outbound_segments = self._parse_segments(itineraries[0].get("segments", []))
-                
-                # Parse return if exists
-                return_segments = None
-                if len(itineraries) > 1:
-                    return_segments = self._parse_segments(itineraries[1].get("segments", []))
-                
-                # Calculate total duration
-                total_duration = sum(s.duration_minutes for s in outbound_segments)
-                if return_segments:
-                    total_duration += sum(s.duration_minutes for s in return_segments)
-                
-                price = float(offer_data["price"]["total"])
-                
-                offer = FlightOffer(
-                    id=offer_data["id"],
-                    price=price,
-                    currency=offer_data["price"]["currency"],
-                    cabin_class=offer_data["travelerPricings"][0]["fareDetailsBySegment"][0]["cabin"],
-                    airline=outbound_segments[0].airline if outbound_segments else "Unknown",
-                    outbound_segments=outbound_segments,
-                    return_segments=return_segments,
-                    total_duration_minutes=total_duration,
-                    stops=len(outbound_segments) - 1,
-                    is_direct=len(outbound_segments) == 1,
-                    source="amadeus",
-                )
-                offers.append(offer)
-                
+                return await kiwi.search_multi_city(routes, passengers)
             except Exception as e:
-                logger.warning(f"Failed to parse Amadeus offer: {e}")
-                continue
+                logger.error(f"Multi-city search failed: {e}")
         
-        return offers
+        return []
     
-    def _parse_segments(self, segments_data: list) -> List[FlightSegment]:
-        """Parse flight segments"""
-        segments = []
-        for seg in segments_data:
-            # Parse ISO duration (PT2H30M)
-            duration_str = seg.get("duration", "PT0H0M")
-            duration_minutes = self._parse_duration(duration_str)
-            
-            segments.append(FlightSegment(
-                departure_airport=seg["departure"]["iataCode"],
-                arrival_airport=seg["arrival"]["iataCode"],
-                departure_time=datetime.fromisoformat(seg["departure"]["at"].replace("Z", "+00:00")),
-                arrival_time=datetime.fromisoformat(seg["arrival"]["at"].replace("Z", "+00:00")),
-                flight_number=f"{seg['carrierCode']}{seg['number']}",
-                airline=seg["carrierCode"],
-                duration_minutes=duration_minutes,
-                aircraft=seg.get("aircraft", {}).get("code"),
-            ))
-        return segments
-    
-    def _parse_duration(self, duration_str: str) -> int:
-        """Parse ISO 8601 duration to minutes"""
-        import re
-        match = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?', duration_str)
-        if match:
-            hours = int(match.group(1) or 0)
-            minutes = int(match.group(2) or 0)
-            return hours * 60 + minutes
-        return 0
-    
-    def _generate_mock_offers(
+    async def search_flexible_dates(
         self,
         origin: str,
         destination: str,
-        departure_date: date,
-        return_date: Optional[date],
-        passengers: int,
+        date_from: date,
+        date_to: date,
+        nights_from: int = 3,
+        nights_to: int = 7,
+        passengers: int = 1,
     ) -> List[FlightOffer]:
-        """Generate mock flight offers for development"""
-        import random
+        """
+        Search flights with flexible dates.
         
-        airlines = [
-            ("RY", "Ryanair"),
-            ("FR", "Ryanair"),
-            ("EI", "Aer Lingus"),
-            ("BA", "British Airways"),
-            ("LH", "Lufthansa"),
-            ("IB", "Iberia"),
-            ("VY", "Vueling"),
-        ]
+        Uses Kiwi provider which excels at flexible date searches.
         
-        offers = []
-        base_prices = [49, 79, 99, 129, 159, 199, 249]
+        Args:
+            origin: Origin airport code
+            destination: Destination airport code
+            date_from: Start of date range
+            date_to: End of date range
+            nights_from: Minimum nights at destination
+            nights_to: Maximum nights at destination
+            passengers: Number of passengers
         
-        for i, price in enumerate(base_prices):
-            airline_code, airline_name = random.choice(airlines)
-            is_direct = random.random() > 0.3
-            
-            dep_hour = random.randint(6, 20)
-            duration = random.randint(90, 240) if not is_direct else random.randint(90, 180)
-            
-            outbound = [FlightSegment(
-                departure_airport=origin,
-                arrival_airport=destination,
-                departure_time=datetime.combine(departure_date, datetime.min.time().replace(hour=dep_hour)),
-                arrival_time=datetime.combine(departure_date, datetime.min.time().replace(hour=(dep_hour + duration // 60) % 24)),
-                flight_number=f"{airline_code}{random.randint(100, 999)}",
-                airline=airline_code,
-                duration_minutes=duration,
-            )]
-            
-            if not is_direct:
-                # Add connection
-                stopover = random.choice(["LHR", "CDG", "AMS", "FRA", "MAD"])
-                outbound = [
-                    FlightSegment(
-                        departure_airport=origin,
-                        arrival_airport=stopover,
-                        departure_time=datetime.combine(departure_date, datetime.min.time().replace(hour=dep_hour)),
-                        arrival_time=datetime.combine(departure_date, datetime.min.time().replace(hour=(dep_hour + 2) % 24)),
-                        flight_number=f"{airline_code}{random.randint(100, 999)}",
-                        airline=airline_code,
-                        duration_minutes=120,
-                    ),
-                    FlightSegment(
-                        departure_airport=stopover,
-                        arrival_airport=destination,
-                        departure_time=datetime.combine(departure_date, datetime.min.time().replace(hour=(dep_hour + 4) % 24)),
-                        arrival_time=datetime.combine(departure_date, datetime.min.time().replace(hour=(dep_hour + 6) % 24)),
-                        flight_number=f"{airline_code}{random.randint(100, 999)}",
-                        airline=airline_code,
-                        duration_minutes=120,
-                    ),
-                ]
-            
-            offers.append(FlightOffer(
-                id=f"mock-{i}",
-                price=float(price * passengers),
-                currency="EUR",
-                cabin_class="economy",
-                airline=airline_name,
-                outbound_segments=outbound,
-                return_segments=None,
-                total_duration_minutes=sum(s.duration_minutes for s in outbound),
-                stops=len(outbound) - 1,
-                is_direct=len(outbound) == 1,
-                source="mock",
-            ))
+        Returns:
+            Best flight offers within the flexible date range
+        """
+        kiwi = self.manager.get_provider("kiwi")
         
-        return offers
+        if kiwi and kiwi.is_configured and kiwi.is_available:
+            try:
+                return await kiwi.search_flexible_dates(
+                    origin, destination, date_from, date_to,
+                    nights_from, nights_to, passengers
+                )
+            except Exception as e:
+                logger.error(f"Flexible date search failed: {e}")
+        
+        return []
     
     async def get_cheapest_dates(
         self,
@@ -300,35 +149,37 @@ class FlightService:
         year: int,
         month: int,
     ) -> List[dict]:
-        """Get cheapest dates for a month"""
-        import calendar
-        from datetime import timedelta
+        """
+        Get cheapest prices for each day of a month.
         
-        # Generate mock data for each day of the month
-        _, num_days = calendar.monthrange(year, month)
+        Useful for displaying price calendars.
         
-        dates = []
-        for day in range(1, num_days + 1):
-            d = date(year, month, day)
-            if d < date.today():
-                continue
-            
-            # Generate realistic-ish prices
-            import random
-            base_price = 80
-            
-            # Weekends more expensive
-            if d.weekday() >= 5:
-                base_price += 30
-            
-            # Add some randomness
-            price = base_price + random.randint(-20, 50)
-            
-            dates.append({
-                "date": d.isoformat(),
-                "price": price,
-                "currency": "EUR",
-            })
+        Args:
+            origin: Origin airport code
+            destination: Destination airport code
+            year: Year
+            month: Month (1-12)
         
-        return dates
+        Returns:
+            List of dicts with "date", "price", "currency" keys
+        """
+        return await self.manager.get_price_calendar(origin, destination, year, month)
+    
+    async def get_provider_status(self) -> dict:
+        """
+        Get status and statistics for all flight providers.
+        
+        Useful for monitoring and debugging.
+        """
+        stats = self.manager.get_provider_stats()
+        health = await self.manager.health_check()
+        
+        return {
+            "providers": stats,
+            "health": health,
+            "available_providers": [p.name for p in self.manager.available_providers],
+        }
 
+
+# Singleton instance
+flight_service = FlightService()

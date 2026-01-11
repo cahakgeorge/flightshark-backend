@@ -3,7 +3,7 @@ Flight Search & Price Endpoints
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import date, datetime
 import logging
 
@@ -17,7 +17,7 @@ from app.schemas.flight import (
     PriceHistoryResponse,
     PricePoint
 )
-from app.services.flight_service import FlightService
+from app.services.flight_service import flight_service
 from app.routers.auth import get_current_user, oauth2_scheme
 from app.models.user import User
 
@@ -34,11 +34,20 @@ async def search_flights(
     passengers: int = Query(1, ge=1, le=9, description="Number of passengers"),
     cabin_class: str = Query("economy", description="Cabin class: economy, premium_economy, business, first"),
     direct_only: bool = Query(False, description="Only show direct flights"),
+    strategy: Literal["fallback", "parallel", "best_price"] = Query(
+        None, description="Search strategy: fallback (try providers in order), parallel (all at once), best_price (cheapest per route)"
+    ),
     db: AsyncSession = Depends(get_db),
     cache = Depends(get_redis),
 ):
     """
     Search for flights between two airports.
+    
+    **Search Strategies:**
+    - `fallback` (default): Try providers in priority order until one succeeds. Fast.
+    - `parallel`: Search all providers simultaneously. Widest selection.
+    - `best_price`: Search all, return cheapest per flight. Best value.
+    
     Results are cached for 5 minutes.
     """
     # Validate dates
@@ -54,20 +63,24 @@ async def search_flights(
             detail="Return date must be after departure date"
         )
     
+    # Use configured default strategy if not specified
+    search_strategy = strategy or settings.FLIGHT_SEARCH_STRATEGY
+    
     # Create cache key
-    cache_key = f"flights:{origin}:{destination}:{departure_date}:{return_date}:{passengers}:{cabin_class}:{direct_only}"
+    cache_key = f"flights:{origin}:{destination}:{departure_date}:{return_date}:{passengers}:{cabin_class}:{direct_only}:{search_strategy}"
     
     # Check cache
     cached_result = await cache.get(cache_key)
     if cached_result:
         logger.info(f"Cache HIT for flight search: {origin} -> {destination}")
         import json
-        return FlightSearchResponse(**json.loads(cached_result))
+        data = json.loads(cached_result)
+        data["cached"] = True
+        return FlightSearchResponse(**data)
     
     # Search flights
-    logger.info(f"Cache MISS - searching flights: {origin} -> {destination}")
+    logger.info(f"Cache MISS - searching flights: {origin} -> {destination} (strategy: {search_strategy})")
     
-    flight_service = FlightService()
     offers = await flight_service.search_flights(
         origin=origin.upper(),
         destination=destination.upper(),
@@ -76,6 +89,7 @@ async def search_flights(
         passengers=passengers,
         cabin_class=cabin_class,
         direct_only=direct_only,
+        strategy=search_strategy,
     )
     
     response = FlightSearchResponse(
@@ -159,7 +173,7 @@ async def get_cheapest_dates(
     origin: str = Query(..., min_length=3, max_length=3),
     destination: str = Query(..., min_length=3, max_length=3),
     month: int = Query(..., ge=1, le=12, description="Month to search (1-12)"),
-    year: int = Query(..., ge=2024, le=2026),
+    year: int = Query(..., ge=2024, le=2027),
     cache = Depends(get_redis),
 ):
     """
@@ -174,9 +188,7 @@ async def get_cheapest_dates(
         import json
         return json.loads(cached_result)
     
-    # This would call flight APIs to get prices for the month
-    # For now, return mock data structure
-    flight_service = FlightService()
+    # Get cheapest dates from providers
     cheapest_dates = await flight_service.get_cheapest_dates(
         origin=origin.upper(),
         destination=destination.upper(),
@@ -197,6 +209,40 @@ async def get_cheapest_dates(
     await cache.setex(cache_key, 3600, json.dumps(result))
     
     return result
+
+
+@router.get("/providers/status")
+async def get_provider_status():
+    """
+    Get status and statistics for all flight search providers.
+    
+    Returns:
+    - Provider health status (healthy, degraded, unavailable)
+    - Configuration status
+    - Success rates and response times
+    - Available providers list
+    
+    Useful for monitoring and debugging.
+    """
+    return await flight_service.get_provider_status()
+
+
+@router.post("/providers/{provider_name}/reset")
+async def reset_provider(provider_name: str):
+    """
+    Reset a provider's status after fixing issues.
+    
+    Use this after resolving API issues or rate limit resets.
+    """
+    provider = flight_service.manager.get_provider(provider_name)
+    if not provider:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Provider '{provider_name}' not found"
+        )
+    
+    flight_service.manager.reset_provider(provider_name)
+    return {"message": f"Provider '{provider_name}' status reset", "status": provider.status.value}
 
 
 @router.post("/alerts")

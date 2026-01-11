@@ -257,6 +257,24 @@ GET  /airlines/{code}/routes   - Get airline's routes
 GET  /airlines/routes/search   - Find airlines on a route
 ```
 
+### Market Insights (Amadeus)
+```
+# Read Endpoints (cached, fast)
+GET  /insights/traveled/{origin}       - Most traveled destinations from origin
+GET  /insights/booked/{origin}         - Most booked destinations from origin
+GET  /insights/busiest-periods/{origin} - Busiest months for travel
+GET  /insights/trending                - Trending destinations (aggregated)
+GET  /insights/popular-routes          - Popular routes worldwide
+
+# Admin/Sync Endpoints (trigger data refresh)
+POST /insights/sync/traveled           - Sync traveled data from Amadeus
+POST /insights/sync/booked             - Sync booked data from Amadeus
+POST /insights/sync/busiest            - Sync busiest periods from Amadeus
+POST /insights/sync/trending           - Recalculate trending scores
+POST /insights/sync/all                - Full sync (weekly task)
+GET  /insights/sync/status             - View recent sync operations
+```
+
 ## Database Schema
 
 ```
@@ -602,6 +620,8 @@ Background tasks use **Celery** with **RabbitMQ** as the message broker:
 | send-checkin-reminders | Every hour | Send check-in reminders |
 | generate-trending | Daily 3 AM | Generate trending insights |
 | cleanup-old-data | Weekly Sun 4 AM | Clean up expired data |
+| **market-insights-weekly** | **Weekly Sun 1 AM** | **Full Amadeus market insights sync** |
+| calculate-trending-daily | Daily 5 AM | Recalculate trending scores |
 
 ### Manual Task Execution
 ```bash
@@ -620,13 +640,45 @@ Access the RabbitMQ dashboard at http://localhost:15672 (guest/guest) to:
 
 ## External Integrations & Partners
 
+### Flight Search Provider Architecture
+
+The backend uses a **multi-provider architecture** with automatic failover for flight searches:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Provider Manager                          │
+│  ┌─────────┐   ┌─────────┐   ┌─────────┐                    │
+│  │ Amadeus │ → │Skyscanner│ → │  Kiwi   │  (priority order)  │
+│  │ (P1)    │   │  (P2)   │   │  (P3)   │                    │
+│  └────┬────┘   └────┬────┘   └────┬────┘                    │
+│       │             │             │                          │
+│       └─────────────┼─────────────┘                          │
+│                     │                                        │
+│              ┌──────▼──────┐                                 │
+│              │  Aggregated │                                 │
+│              │   Results   │                                 │
+│              └─────────────┘                                 │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Search Strategies:**
+- `fallback` - Try providers in priority order until one succeeds (fastest)
+- `parallel` - Search all providers simultaneously (widest selection)
+- `best_price` - Search all, deduplicate by cheapest (best value)
+
+**Provider Features:**
+- Automatic health tracking and failover
+- Request rate limiting per provider
+- Response time metrics
+- Status monitoring endpoint: `GET /flights/providers/status`
+
 ### Flight Data Partners
 
-| Partner | Integration | Use Case | Status |
-|---------|-------------|----------|--------|
-| **Amadeus** | REST API | Primary flight search, pricing, route discovery | ✅ Active |
-| **Skyscanner** | Affiliate API | Price comparison, meta-search | 🔄 Planned |
-| **Kiwi.com** | REST API | Multi-city search, flexible dates | 🔄 Planned |
+| Partner | Integration | Use Case | Priority | Status |
+|---------|-------------|----------|----------|--------|
+| **Amadeus** | REST API | Primary flight search, pricing, route discovery | 1 | ✅ Active |
+| **Skyscanner** | RapidAPI | Price comparison, meta-search aggregator | 2 | ✅ Ready |
+| **Kiwi.com** | Tequila API | Multi-city, flexible dates, virtual interlining | 3 | ✅ Ready |
 
 ### Accommodation Partners
 
@@ -634,12 +686,52 @@ Access the RabbitMQ dashboard at http://localhost:15672 (guest/guest) to:
 |---------|-------------|----------|--------|
 | **Booking.com** | Affiliate API | Hotel search, accommodation booking | 🔄 Planned |
 
+### Market Insights (Amadeus Travel Intelligence)
+
+The system uses **Amadeus Market Insights APIs** to provide travel trends and analytics:
+
+| API | Data Provided | Update Frequency |
+|-----|---------------|------------------|
+| **Flight Most Traveled** | Top destinations by traffic | Weekly |
+| **Flight Most Booked** | Top destinations by bookings | Weekly |
+| **Flight Busiest Period** | Busiest months for travel | Weekly |
+
+**How it works:**
+
+1. **Weekly Sync** (Sunday 1 AM UTC): Celery task fetches data from Amadeus for major origins
+2. **Storage**: Data stored in PostgreSQL with full historical tracking
+3. **Caching**: Results cached in Redis (24h for traveled/booked, 1h for trending)
+4. **Trending Calculation**: Daily aggregation of traveled + booked scores
+
+**API Usage:**
+
+```bash
+# Get most traveled destinations from Dublin
+curl "http://localhost:8000/insights/traveled/DUB?limit=20"
+
+# Get trending destinations globally
+curl "http://localhost:8000/insights/trending?origin=GLOBAL"
+
+# Get busiest months for London departures
+curl "http://localhost:8000/insights/busiest-periods/LHR?direction=DEPARTING"
+
+# Manually trigger full sync (admin)
+curl -X POST "http://localhost:8000/insights/sync/all"
+```
+
+**Database Tables:**
+- `traveled_destinations` - Most traveled destinations per origin
+- `booked_destinations` - Most booked destinations per origin
+- `busiest_travel_periods` - Busiest months per origin
+- `trending_destinations` - Aggregated trending scores
+- `market_insights_sync_log` - Sync operation tracking
+
 ### Reference Data Sources
 
 | Source | Data | API Key Required |
 |--------|------|------------------|
 | **OpenFlights.org** | Airports, airlines, routes (static) | No |
-| **Amadeus** | Real-time pricing, route discovery | Yes |
+| **Amadeus** | Real-time pricing, route discovery, market insights | Yes |
 
 ### Social Media
 - **TikTok** - Travel content (unofficial scraping)
@@ -662,16 +754,32 @@ DATABASE_URL=postgresql+asyncpg://...
 REDIS_URL=redis://...
 MONGODB_URL=mongodb://...
 
-# Flight Data Partners (at least one recommended)
+# ================================
+# Flight Search Providers
+# ================================
+# The system supports multiple providers with automatic failover.
+# Configure at least one for real flight data.
+
+# Search strategy: "fallback" (try in order), "parallel" (all at once), "best_price" (cheapest per route)
+FLIGHT_SEARCH_STRATEGY=fallback
+
+# Primary: Amadeus (https://developers.amadeus.com/)
+# Free tier: ~2000 calls/month
 AMADEUS_API_KEY=your-amadeus-api-key
 AMADEUS_API_SECRET=your-amadeus-api-secret
-AMADEUS_USE_TEST_API=true  # Set to false for production
+AMADEUS_USE_TEST_API=true  # Set to false for production API
 
-# Skyscanner (coming soon)
-# SKYSCANNER_API_KEY=your-skyscanner-api-key
+# Secondary: Skyscanner (via RapidAPI - https://rapidapi.com/skyscanner/api/skyscanner-flight-search)
+# Great for price comparison, meta-search
+SKYSCANNER_API_KEY=your-rapidapi-skyscanner-key
 
-# Booking.com Affiliate (coming soon)
-# BOOKING_AFFILIATE_ID=your-affiliate-id
+# Tertiary: Kiwi.com (https://tequila.kiwi.com/)
+# Free tier: 1000 calls/day. Excellent for multi-city and flexible dates
+KIWI_API_KEY=your-kiwi-tequila-key
+
+# ================================
+# Other Integrations
+# ================================
 
 # Notifications (optional)
 SENDGRID_API_KEY=your-sendgrid-api-key

@@ -25,10 +25,11 @@ REQUEST_LATENCY = Histogram(
     'HTTP request latency in seconds',
     ['method', 'endpoint']
 )
-from app.routers import auth, flights, trips, destinations, users, health, airports, airlines, admin_data
-from app.utils.database import init_db, close_db
+from app.routers import auth, flights, trips, destinations, users, health, airports, airlines, admin_data, insights
+from app.utils.database import init_db, close_db, AsyncSessionLocal
 from app.utils.redis import init_redis, close_redis
 from app.utils.mongodb import init_mongodb, close_mongodb
+from app.services.airport_cache import AirportCacheService
 
 # Configure logging
 logging.basicConfig(
@@ -51,6 +52,24 @@ async def lifespan(app: FastAPI):
     await init_mongodb()
     
     logger.info("All connections established successfully")
+    
+    # Preload reference data into cache for instant search
+    logger.info("Preloading reference data into cache...")
+    try:
+        # Check if airports are already cached (from previous startup)
+        cache_loaded = await AirportCacheService.is_cache_loaded()
+        
+        if not cache_loaded:
+            # Load airports into Redis cache
+            async with AsyncSessionLocal() as db:
+                airport_count = await AirportCacheService.load_airports_to_cache(db)
+                logger.info(f"Preloaded {airport_count} airports into cache")
+        else:
+            logger.info("Airport cache already loaded (from previous session)")
+    except Exception as e:
+        logger.warning(f"Failed to preload airport cache: {e}. Will use database fallback.")
+    
+    logger.info("Flightshark API ready to serve requests!")
     
     yield
     
@@ -130,6 +149,7 @@ app.include_router(destinations.router, prefix="/destinations", tags=["Destinati
 app.include_router(users.router, prefix="/users", tags=["Users"])
 app.include_router(airports.router, prefix="/airports", tags=["Airports"])
 app.include_router(airlines.router, prefix="/airlines", tags=["Airlines"])
+app.include_router(insights.router, prefix="/insights", tags=["Market Insights"])
 app.include_router(admin_data.router, prefix="/admin/data", tags=["Admin - Data Seeding"])
 
 

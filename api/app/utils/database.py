@@ -3,20 +3,28 @@ PostgreSQL Database Connection & Session Management
 """
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import NullPool, QueuePool
 import logging
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Create async engine
+# Create async engine with performance optimizations
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.DEBUG,
     pool_size=settings.DB_POOL_SIZE,
     max_overflow=settings.DB_MAX_OVERFLOW,
     pool_pre_ping=True,
+    pool_recycle=3600,  # Recycle connections after 1 hour
+    pool_timeout=10,  # Wait max 10 seconds for a connection from pool
+    connect_args={
+        "command_timeout": 30,  # Query timeout in seconds
+        "server_settings": {
+            "statement_timeout": "30000",  # 30 seconds max per statement
+        }
+    },
 )
 
 # Session factory

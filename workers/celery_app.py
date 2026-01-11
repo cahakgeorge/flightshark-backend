@@ -20,6 +20,7 @@ app = Celery(
         "tasks.notifications",
         "tasks.analytics",
         "tasks.reference_data",
+        "tasks.market_insights",
     ]
 )
 
@@ -50,6 +51,7 @@ app.conf.update(
         "tasks.flight_prices.*": {"rate_limit": "10/m"},  # 10 per minute
         "tasks.scraping.*": {"rate_limit": "5/m"},  # 5 per minute (be nice to APIs)
         "tasks.reference_data.*": {"rate_limit": "2/m"},  # 2 per minute (heavy API calls)
+        "tasks.market_insights.*": {"rate_limit": "5/m"},  # 5 per minute for Amadeus API
     },
     
     # Routing
@@ -59,6 +61,7 @@ app.conf.update(
         "tasks.notifications.*": {"queue": "notifications"},
         "tasks.analytics.*": {"queue": "analytics"},
         "tasks.reference_data.*": {"queue": "reference_data"},
+        "tasks.market_insights.*": {"queue": "insights"},
     },
 )
 
@@ -129,6 +132,49 @@ app.conf.beat_schedule = {
         "task": "tasks.reference_data.seed_all_major_airports",
         "schedule": crontab(hour=2, minute=0, day_of_week=0),
         "options": {"queue": "reference_data"},
+    },
+    
+    # ==================
+    # Market Insights Tasks (Weekly - from Amadeus)
+    # ==================
+    
+    # Full weekly market insights sync (Sunday 1 AM UTC)
+    # Syncs: most traveled, most booked, busiest periods, trending
+    "market-insights-weekly-sync": {
+        "task": "market_insights.full_weekly_sync",
+        "schedule": crontab(hour=1, minute=0, day_of_week=0),  # Sunday 1 AM
+        "options": {"queue": "insights"},
+    },
+    
+    # Individual tasks if you prefer more granular scheduling
+    # These are alternatives to the full_weekly_sync above
+    
+    # Sync most traveled destinations (Sunday 1:00 AM)
+    # "sync-traveled-weekly": {
+    #     "task": "market_insights.sync_traveled",
+    #     "schedule": crontab(hour=1, minute=0, day_of_week=0),
+    #     "options": {"queue": "insights"},
+    # },
+    
+    # Sync most booked destinations (Sunday 1:30 AM)
+    # "sync-booked-weekly": {
+    #     "task": "market_insights.sync_booked",
+    #     "schedule": crontab(hour=1, minute=30, day_of_week=0),
+    #     "options": {"queue": "insights"},
+    # },
+    
+    # Sync busiest periods (Sunday 2:00 AM)
+    # "sync-busiest-weekly": {
+    #     "task": "market_insights.sync_busiest",
+    #     "schedule": crontab(hour=2, minute=0, day_of_week=0),
+    #     "options": {"queue": "insights"},
+    # },
+    
+    # Calculate trending daily at 5 AM (uses already synced data)
+    "calculate-trending-daily": {
+        "task": "market_insights.calculate_trending",
+        "schedule": crontab(hour=5, minute=0),
+        "options": {"queue": "insights"},
     },
 }
 

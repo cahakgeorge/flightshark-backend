@@ -23,10 +23,16 @@ async def init_redis():
         settings.REDIS_URL,
         encoding="utf-8",
         decode_responses=True,
+        socket_connect_timeout=5,  # 5 second connection timeout
+        socket_timeout=5,  # 5 second operation timeout
+        retry_on_timeout=True,
     )
     # Test connection
-    await redis_client.ping()
-    logger.info("Redis connection established")
+    try:
+        await redis_client.ping()
+        logger.info("Redis connection established")
+    except Exception as e:
+        logger.warning(f"Redis connection failed: {e}. Caching will be disabled.")
 
 
 async def close_redis():
@@ -38,14 +44,47 @@ async def close_redis():
         logger.info("Redis connection closed")
 
 
+class NoOpCache:
+    """A no-op cache that does nothing - used when Redis is unavailable"""
+    async def get(self, key: str) -> None:
+        return None
+    
+    async def set(self, key: str, value: Any, *args, **kwargs) -> bool:
+        return True
+    
+    async def setex(self, key: str, ttl: int, value: Any) -> bool:
+        return True
+    
+    async def delete(self, key: str) -> int:
+        return 0
+    
+    async def exists(self, key: str) -> int:
+        return 0
+    
+    async def keys(self, pattern: str) -> list:
+        return []
+
+_noop_cache = NoOpCache()
+
+
 async def get_redis() -> redis.Redis:
     """
     Dependency that provides Redis client
     Usage: cache: redis.Redis = Depends(get_redis)
+    
+    Returns a no-op cache if Redis is unavailable (graceful degradation)
     """
     if redis_client is None:
-        raise RuntimeError("Redis client not initialized")
-    return redis_client
+        logger.warning("Redis client not initialized, using no-op cache")
+        return _noop_cache
+    
+    # Quick health check
+    try:
+        await redis_client.ping()
+        return redis_client
+    except Exception as e:
+        logger.warning(f"Redis ping failed: {e}, using no-op cache")
+        return _noop_cache
 
 
 class CacheService:
