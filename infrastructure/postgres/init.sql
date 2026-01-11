@@ -25,16 +25,16 @@ CREATE TABLE IF NOT EXISTS price_history (
 -- Convert to hypertable (TimescaleDB)
 SELECT create_hypertable('price_history', 'time', if_not_exists => TRUE);
 
--- Add compression policy (compress chunks older than 7 days)
+-- Add compression policy (compress chunks older than 14 days)
 ALTER TABLE price_history SET (
     timescaledb.compress,
     timescaledb.compress_segmentby = 'origin_code, destination_code'
 );
 
-SELECT add_compression_policy('price_history', INTERVAL '7 days', if_not_exists => TRUE);
+SELECT add_compression_policy('price_history', INTERVAL '14 days', if_not_exists => TRUE);
 
--- Add retention policy (keep 1 year of data)
-SELECT add_retention_policy('price_history', INTERVAL '1 year', if_not_exists => TRUE);
+-- Add retention policy (keep 4 year of data)
+SELECT add_retention_policy('price_history', INTERVAL '4 years', if_not_exists => TRUE);
 
 -- Create continuous aggregate for daily price averages
 CREATE MATERIALIZED VIEW IF NOT EXISTS price_daily_avg
@@ -53,7 +53,7 @@ WITH NO DATA;
 
 -- Refresh policy for the continuous aggregate
 SELECT add_continuous_aggregate_policy('price_daily_avg',
-    start_offset => INTERVAL '7 days',
+    start_offset => INTERVAL '14 days',
     end_offset => INTERVAL '1 hour',
     schedule_interval => INTERVAL '1 hour',
     if_not_exists => TRUE
@@ -187,22 +187,23 @@ CREATE TABLE IF NOT EXISTS aircraft (
 -- =====================
 -- SEED DATA: AIRLINES
 -- =====================
+-- Using Aviasales CDN for airline logos: https://pics.avs.io/{WIDTH}/{HEIGHT}/{IATA}.png
 INSERT INTO airlines (iata_code, icao_code, name, country, country_code, is_low_cost, logo_url, alliance) VALUES
-('FR', 'RYR', 'Ryanair', 'Ireland', 'IE', TRUE, 'https://logo.clearbit.com/ryanair.com', NULL),
-('EI', 'EIN', 'Aer Lingus', 'Ireland', 'IE', FALSE, 'https://logo.clearbit.com/aerlingus.com', NULL),
-('BA', 'BAW', 'British Airways', 'United Kingdom', 'GB', FALSE, 'https://logo.clearbit.com/britishairways.com', 'Oneworld'),
-('LH', 'DLH', 'Lufthansa', 'Germany', 'DE', FALSE, 'https://logo.clearbit.com/lufthansa.com', 'Star Alliance'),
-('AF', 'AFR', 'Air France', 'France', 'FR', FALSE, 'https://logo.clearbit.com/airfrance.com', 'SkyTeam'),
-('KL', 'KLM', 'KLM', 'Netherlands', 'NL', FALSE, 'https://logo.clearbit.com/klm.com', 'SkyTeam'),
-('IB', 'IBE', 'Iberia', 'Spain', 'ES', FALSE, 'https://logo.clearbit.com/iberia.com', 'Oneworld'),
-('VY', 'VLG', 'Vueling', 'Spain', 'ES', TRUE, 'https://logo.clearbit.com/vueling.com', NULL),
-('U2', 'EZY', 'easyJet', 'United Kingdom', 'GB', TRUE, 'https://logo.clearbit.com/easyjet.com', NULL),
-('W6', 'WZZ', 'Wizz Air', 'Hungary', 'HU', TRUE, 'https://logo.clearbit.com/wizzair.com', NULL),
-('SK', 'SAS', 'SAS', 'Sweden', 'SE', FALSE, 'https://logo.clearbit.com/flysas.com', 'SkyTeam'),
-('AZ', 'ITY', 'ITA Airways', 'Italy', 'IT', FALSE, 'https://logo.clearbit.com/ita-airways.com', 'SkyTeam'),
-('TP', 'TAP', 'TAP Portugal', 'Portugal', 'PT', FALSE, 'https://logo.clearbit.com/flytap.com', 'Star Alliance'),
-('LX', 'SWR', 'Swiss', 'Switzerland', 'CH', FALSE, 'https://logo.clearbit.com/swiss.com', 'Star Alliance'),
-('OS', 'AUA', 'Austrian', 'Austria', 'AT', FALSE, 'https://logo.clearbit.com/austrian.com', 'Star Alliance')
+('FR', 'RYR', 'Ryanair', 'Ireland', 'IE', TRUE, 'https://pics.avs.io/100/100/FR.png', NULL),
+('EI', 'EIN', 'Aer Lingus', 'Ireland', 'IE', FALSE, 'https://pics.avs.io/100/100/EI.png', NULL),
+('BA', 'BAW', 'British Airways', 'United Kingdom', 'GB', FALSE, 'https://pics.avs.io/100/100/BA.png', 'Oneworld'),
+('LH', 'DLH', 'Lufthansa', 'Germany', 'DE', FALSE, 'https://pics.avs.io/100/100/LH.png', 'Star Alliance'),
+('AF', 'AFR', 'Air France', 'France', 'FR', FALSE, 'https://pics.avs.io/100/100/AF.png', 'SkyTeam'),
+('KL', 'KLM', 'KLM', 'Netherlands', 'NL', FALSE, 'https://pics.avs.io/100/100/KL.png', 'SkyTeam'),
+('IB', 'IBE', 'Iberia', 'Spain', 'ES', FALSE, 'https://pics.avs.io/100/100/IB.png', 'Oneworld'),
+('VY', 'VLG', 'Vueling', 'Spain', 'ES', TRUE, 'https://pics.avs.io/100/100/VY.png', NULL),
+('U2', 'EZY', 'easyJet', 'United Kingdom', 'GB', TRUE, 'https://pics.avs.io/100/100/U2.png', NULL),
+('W6', 'WZZ', 'Wizz Air', 'Hungary', 'HU', TRUE, 'https://pics.avs.io/100/100/W6.png', NULL),
+('SK', 'SAS', 'SAS', 'Sweden', 'SE', FALSE, 'https://pics.avs.io/100/100/SK.png', 'SkyTeam'),
+('AZ', 'ITY', 'ITA Airways', 'Italy', 'IT', FALSE, 'https://pics.avs.io/100/100/AZ.png', 'SkyTeam'),
+('TP', 'TAP', 'TAP Portugal', 'Portugal', 'PT', FALSE, 'https://pics.avs.io/100/100/TP.png', 'Star Alliance'),
+('LX', 'SWR', 'Swiss', 'Switzerland', 'CH', FALSE, 'https://pics.avs.io/100/100/LX.png', 'Star Alliance'),
+('OS', 'AUA', 'Austrian', 'Austria', 'AT', FALSE, 'https://pics.avs.io/100/100/OS.png', 'Star Alliance')
 ON CONFLICT (iata_code) DO NOTHING;
 
 -- =====================

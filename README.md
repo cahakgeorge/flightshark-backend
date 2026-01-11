@@ -293,7 +293,7 @@ Manage all the core reference data that powers the platform:
 **Add a new airline:**
 1. Go to Admin → Airlines → Add Airline
 2. Enter IATA code (e.g., `UA`), name, country
-3. Add logo URL from `logo.clearbit.com/airline.com`
+3. Add logo URL using Aviasales CDN: `https://pics.avs.io/100/100/{IATA_CODE}.png`
 4. Set alliance and type (low-cost, charter, etc.)
 
 **Add a new route:**

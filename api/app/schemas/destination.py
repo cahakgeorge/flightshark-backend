@@ -27,6 +27,9 @@ class DestinationBase(BaseModel):
     best_time_to_visit: Optional[str] = None
     average_price: Optional[float] = None
     image_url: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
 
 
 class DestinationResponse(DestinationBase):
