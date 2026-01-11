@@ -618,20 +618,37 @@ Access the RabbitMQ dashboard at http://localhost:15672 (guest/guest) to:
 - Monitor worker connections
 - Debug failed tasks
 
-## External Integrations
+## External Integrations & Partners
 
-### Flight APIs
-- **Amadeus** - Primary flight search
-- **Skyscanner** - Price comparison
-- **Kiwi.com** - Multi-city search
+### Flight Data Partners
+
+| Partner | Integration | Use Case | Status |
+|---------|-------------|----------|--------|
+| **Amadeus** | REST API | Primary flight search, pricing, route discovery | ✅ Active |
+| **Skyscanner** | Affiliate API | Price comparison, meta-search | 🔄 Planned |
+| **Kiwi.com** | REST API | Multi-city search, flexible dates | 🔄 Planned |
+
+### Accommodation Partners
+
+| Partner | Integration | Use Case | Status |
+|---------|-------------|----------|--------|
+| **Booking.com** | Affiliate API | Hotel search, accommodation booking | 🔄 Planned |
+
+### Reference Data Sources
+
+| Source | Data | API Key Required |
+|--------|------|------------------|
+| **OpenFlights.org** | Airports, airlines, routes (static) | No |
+| **Amadeus** | Real-time pricing, route discovery | Yes |
 
 ### Social Media
-- **TikTok** - Travel content (unofficial)
-- **Twitter/X** - Travel mentions
+- **TikTok** - Travel content (unofficial scraping)
+- **Twitter/X** - Travel mentions and trends
+- **Instagram** - Destination content
 
 ### Notifications
-- **SendGrid** - Email notifications
-- **Twilio** - SMS notifications
+- **SendGrid** - Transactional emails (price alerts, confirmations)
+- **Twilio** - SMS notifications (optional)
 
 ## Environment Variables
 
@@ -645,12 +662,19 @@ DATABASE_URL=postgresql+asyncpg://...
 REDIS_URL=redis://...
 MONGODB_URL=mongodb://...
 
-# Optional - Flight APIs
-AMADEUS_API_KEY=...
-AMADEUS_API_SECRET=...
+# Flight Data Partners (at least one recommended)
+AMADEUS_API_KEY=your-amadeus-api-key
+AMADEUS_API_SECRET=your-amadeus-api-secret
+AMADEUS_USE_TEST_API=true  # Set to false for production
 
-# Optional - Notifications
-SENDGRID_API_KEY=...
+# Skyscanner (coming soon)
+# SKYSCANNER_API_KEY=your-skyscanner-api-key
+
+# Booking.com Affiliate (coming soon)
+# BOOKING_AFFILIATE_ID=your-affiliate-id
+
+# Notifications (optional)
+SENDGRID_API_KEY=your-sendgrid-api-key
 ```
 
 ## Load Balancer (Nginx)

@@ -72,8 +72,10 @@ async def search_airports(
             )
         )
         .order_by(
-            # Prioritize exact code matches, then major airports
-            Airport.iata_code == query_upper,  # Exact match first
+            # Prioritize: 1) exact code match, 2) code starts with, 3) city starts with, 4) major airports
+            (Airport.iata_code == query_upper).desc(),  # Exact code match first
+            (Airport.iata_code.ilike(f"{query_upper}%")).desc(),  # Code starts with query
+            (Airport.city.ilike(f"{q}%")).desc(),  # City starts with query
             Airport.is_major.desc(),
             Airport.city
         )
