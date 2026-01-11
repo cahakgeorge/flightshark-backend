@@ -1,0 +1,81 @@
+# Environment files (NEVER commit these!)
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Logs
+*.log
+logs/
+
+# Docker
+.docker/
+
+# Database
+*.sqlite3
+*.db
+
+# Certificates (keep the .gitkeep)
+infrastructure/nginx/certs/*.pem
+infrastructure/nginx/certs/*.key
+infrastructure/nginx/certs/*.crt
+!infrastructure/nginx/certs/.gitkeep
+
+# Static files (generated)
+staticfiles/
+static/
+
+# Coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# pytest
+.pytest_cache/
+.cache
+
+# mypy
+.mypy_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+my_ideas.txt

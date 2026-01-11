@@ -33,14 +33,13 @@ services:
     container_name: flightshark-api
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://flightshark:flightshark_dev@postgres:5432/flightshark
-      - REDIS_URL=redis://redis:6379/0
-      - MONGODB_URL=mongodb://mongo:27017/flightshark
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
-      - DEBUG=true
-      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:8000,http://127.0.0.1:3000,http://127.0.0.1:3001
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      - REDIS_URL=redis://${REDIS_HOST}:${REDIS_PORT}/0
+      - MONGODB_URL=mongodb://${MONGODB_HOST}:${MONGODB_PORT}/${MONGODB_DATABASE}
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@${RABBITMQ_HOST}:${RABBITMQ_PORT}/
     volumes:
       - ./api:/app
       - ./shared:/app/shared
@@ -62,12 +61,12 @@ services:
     container_name: flightshark-admin
     ports:
       - "8001:8000"
+    env_file:
+      - .env
     environment:
-      - DATABASE_URL=postgresql://flightshark:flightshark_dev@postgres:5432/flightshark
-      - REDIS_URL=redis://redis:6379/1
-      - SECRET_KEY=${DJANGO_SECRET_KEY:-django-dev-secret-key}
-      - DEBUG=true
-      - ALLOWED_HOSTS=localhost,127.0.0.1
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      - REDIS_URL=redis://${REDIS_HOST}:${REDIS_PORT}/1
+      - SECRET_KEY=${DJANGO_SECRET_KEY}
     volumes:
       - ./admin:/app
       - ./shared:/app/shared
@@ -88,13 +87,13 @@ services:
       dockerfile: Dockerfile
     container_name: flightshark-worker
     command: celery -A celery_app worker -l info -c 4
+    env_file:
+      - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://flightshark:flightshark_dev@postgres:5432/flightshark
-      - REDIS_URL=redis://redis:6379/0
-      - MONGODB_URL=mongodb://mongo:27017/flightshark
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
-      - AMADEUS_API_KEY=${AMADEUS_API_KEY:-}
-      - AMADEUS_API_SECRET=${AMADEUS_API_SECRET:-}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      - REDIS_URL=redis://${REDIS_HOST}:${REDIS_PORT}/0
+      - MONGODB_URL=mongodb://${MONGODB_HOST}:${MONGODB_PORT}/${MONGODB_DATABASE}
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@${RABBITMQ_HOST}:${RABBITMQ_PORT}/
     volumes:
       - ./workers:/app
       - ./shared:/app/shared
@@ -113,9 +112,11 @@ services:
       dockerfile: Dockerfile
     container_name: flightshark-beat
     command: celery -A celery_app beat -l info
+    env_file:
+      - .env
     environment:
-      - REDIS_URL=redis://redis:6379/0
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - REDIS_URL=redis://${REDIS_HOST}:${REDIS_PORT}/0
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@${RABBITMQ_HOST}:${RABBITMQ_PORT}/
     volumes:
       - ./workers:/app
     depends_on:
@@ -133,15 +134,17 @@ services:
     container_name: flightshark-postgres
     ports:
       - "5432:5432"
+    env_file:
+      - .env
     environment:
-      - POSTGRES_DB=flightshark
-      - POSTGRES_USER=flightshark
-      - POSTGRES_PASSWORD=flightshark_dev
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U flightshark -d flightshark"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -178,9 +181,11 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
+    env_file:
+      - .env
     environment:
-      - RABBITMQ_DEFAULT_USER=guest
-      - RABBITMQ_DEFAULT_PASS=guest
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     networks:
@@ -206,14 +211,37 @@ services:
       - flightshark-network
     restart: unless-stopped
 
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
+    ports:
+      - "9187:9187"
+    depends_on:
+      - postgres
+    networks:
+      - flightshark-network
+
+  mongodb-exporter:
+      image: percona/mongodb_exporter:0.40
+      command: --mongodb.uri=mongodb://mongo:27017
+      ports:
+        - "9216:9216"
+      depends_on:
+        - mongo
+      networks:
+        - flightshark-network
+
   grafana:
     image: grafana/grafana:latest
     container_name: flightshark-grafana
     ports:
       - "3002:3000"
+    env_file:
+      - .env
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=${GF_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana_data:/var/lib/grafana
@@ -267,4 +295,3 @@ volumes:
   grafana_data:
   loki_data:
   admin_static:
-

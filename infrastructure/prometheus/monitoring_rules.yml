@@ -1,0 +1,153 @@
+groups:
+- name: http_status_rates
+  interval: 30s
+  rules:
+  # HTTP Status Metrics
+  - record: http_request_rate_by_status
+    expr: sum(rate(http_requests_total[5m])) by (status)
+
+  - record: http_request_success_rate
+    expr: sum(rate(http_requests_total{status=~"2.."}[5m])) / sum(rate(http_requests_total[5m])) * 100
+
+  - record: http_request_error_4xx_rate
+    expr: sum(rate(http_requests_total{status=~"4.."}[5m])) / sum(rate(http_requests_total[5m])) * 100
+
+  - record: http_request_error_5xx_rate
+    expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) * 100
+
+- name: performance_metrics
+  interval: 30s
+  rules:
+  # Response Time & Latency
+  - record: http_request_duration_p95
+    expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+
+  - record: http_request_duration_p99
+    expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+
+  - record: http_request_duration_avg
+    expr: sum(rate(http_request_duration_seconds_sum[5m])) / sum(rate(http_request_duration_seconds_count[5m]))
+
+  # Request Rate & Throughput
+  - record: http_requests_per_second
+    expr: sum(rate(http_requests_total[5m]))
+
+  - record: http_requests_per_minute
+    expr: sum(rate(http_requests_total[5m])) * 60
+
+- name: infrastructure_metrics
+  interval: 30s
+  rules:
+  # CPU & Memory
+  - record: cpu_usage_percent
+    expr: 100 - (avg(irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+
+  - record: memory_usage_percent
+    expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100
+
+  - record: disk_usage_percent
+    expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100
+
+- name: database_metrics
+  interval: 30s
+  rules:
+  # Database Performance
+  - record: db_query_duration_p95
+    expr: histogram_quantile(0.95, sum(rate(db_query_duration_seconds_bucket[5m])) by (le))
+
+  - record: db_connections_active
+    expr: sum(db_connections{state="active"})
+
+  - record: db_slow_queries_rate
+    expr: sum(rate(db_slow_queries_total[5m]))
+
+- name: database_metrics
+  rules:
+  - record: db_query_duration_p95
+    expr: histogram_quantile(0.95, sum(rate(db_query_duration_seconds_bucket[5m])) by (le, database))
+
+  - record: db_queries_per_second
+    expr: sum(rate(db_queries_total[5m])) by (database)
+
+  - record: db_error_rate
+    expr: sum(rate(db_queries_total{status="error"}[5m])) / sum(rate(db_queries_total[5m])) * 100
+  # Database perf metrics, app exposed metrics
+
+  # - record: db_connections_active
+  #   expr: sum(db_connections{state="active"})
+
+  # - record: db_slow_queries_rate
+  #   expr: sum(rate(db_slow_queries_total[5m]))
+
+
+
+- name: cache_metrics
+  interval: 30s
+  rules:
+  # Cache Performance
+  - record: cache_hit_rate
+    expr: sum(rate(cache_hits_total[5m])) / (sum(rate(cache_hits_total[5m])) + sum(rate(cache_misses_total[5m]))) * 100
+
+  - record: cache_miss_rate
+    expr: sum(rate(cache_misses_total[5m])) / (sum(rate(cache_hits_total[5m])) + sum(rate(cache_misses_total[5m]))) * 100
+
+- name: external_services
+  interval: 30s
+  rules:
+  # External API Performance
+  - record: external_api_success_rate
+    expr: sum(rate(external_api_requests_total{status=~"2.."}[5m])) / sum(rate(external_api_requests_total[5m])) * 100
+
+  - record: external_api_latency_p95
+    expr: histogram_quantile(0.95, sum(rate(external_api_duration_seconds_bucket[5m])) by (le, service))
+
+- name: business_metrics
+  interval: 30s
+  rules:
+  # User Activity
+  - record: active_users_per_minute
+    expr: sum(rate(user_sessions_total[1m])) * 60
+
+  - record: user_signup_rate
+    expr: sum(rate(user_registrations_total[5m]))
+
+  - record: conversion_rate
+    expr: sum(rate(purchases_total[5m])) / sum(rate(page_views_total{page="checkout"}[5m])) * 100
+
+  # Error Tracking
+  - record: application_error_rate
+    expr: sum(rate(application_errors_total[5m])) / sum(rate(http_requests_total[5m])) * 100
+
+  - record: critical_errors_per_hour
+    expr: sum(rate(application_errors_total{severity="critical"}[5m])) * 3600
+
+- name: sli_slo_metrics
+  interval: 30s
+  rules:
+  # Availability
+  - record: service_availability
+    expr: sum(up) / count(up) * 100
+
+  - record: uptime_percentage_24h
+    expr: avg_over_time(up[24h]) * 100
+
+  # Apdex Score
+  - record: apdex_score
+    expr: (sum(rate(http_request_duration_seconds_bucket{le="0.5"}[5m])) + sum(rate(http_request_duration_seconds_bucket{le="2.0"}[5m])) / 2) / sum(rate(http_request_duration_seconds_count[5m]))
+
+- name: anomaly_detection
+  interval: 60s
+  rules:
+  # Anomaly Detection
+  - record: request_rate_anomaly
+    expr: abs(sum(rate(http_requests_total[5m])) - avg_over_time(sum(rate(http_requests_total[5m]))[1h:5m])) / avg_over_time(sum(rate(http_requests_total[5m]))[1h:5m]) * 100
+
+- name: growth_metrics
+  interval: 300s
+  rules:
+  # Trend Analysis
+  - record: daily_active_users
+    expr: count(increase(user_activity_total[24h]) > 0)
+
+  - record: revenue_per_hour
+    expr: sum(rate(revenue_total[1h])) * 3600
