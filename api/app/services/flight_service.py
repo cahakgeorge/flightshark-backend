@@ -70,9 +70,12 @@ class FlightService:
         if self.amadeus_token and self.amadeus_token_expiry and datetime.utcnow() < self.amadeus_token_expiry:
             return self.amadeus_token
         
+        # Use the same base URL (test vs production) for auth
+        auth_url = settings.AMADEUS_BASE_URL.replace("/v2", "/v1/security/oauth2/token")
+        
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                "https://api.amadeus.com/v1/security/oauth2/token",
+                auth_url,
                 data={
                     "grant_type": "client_credentials",
                     "client_id": settings.AMADEUS_API_KEY,
@@ -258,7 +261,7 @@ class FlightService:
                         departure_airport=origin,
                         arrival_airport=stopover,
                         departure_time=datetime.combine(departure_date, datetime.min.time().replace(hour=dep_hour)),
-                        arrival_time=datetime.combine(departure_date, datetime.min.time().replace(hour=dep_hour + 2)),
+                        arrival_time=datetime.combine(departure_date, datetime.min.time().replace(hour=(dep_hour + 2) % 24)),
                         flight_number=f"{airline_code}{random.randint(100, 999)}",
                         airline=airline_code,
                         duration_minutes=120,
@@ -266,8 +269,8 @@ class FlightService:
                     FlightSegment(
                         departure_airport=stopover,
                         arrival_airport=destination,
-                        departure_time=datetime.combine(departure_date, datetime.min.time().replace(hour=dep_hour + 4)),
-                        arrival_time=datetime.combine(departure_date, datetime.min.time().replace(hour=dep_hour + 6)),
+                        departure_time=datetime.combine(departure_date, datetime.min.time().replace(hour=(dep_hour + 4) % 24)),
+                        arrival_time=datetime.combine(departure_date, datetime.min.time().replace(hour=(dep_hour + 6) % 24)),
                         flight_number=f"{airline_code}{random.randint(100, 999)}",
                         airline=airline_code,
                         duration_minutes=120,

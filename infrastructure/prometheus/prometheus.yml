@@ -14,8 +14,9 @@ global:
 #           - alertmanager:9093
 
 # Rule files (optional)
-# rule_files:
-#   - "alerts/*.yml"
+rule_files:
+  # - "alerts/*.yml"
+  - "monitoring_rules.yml"
 
 scrape_configs:
   # Prometheus self-monitoring
@@ -39,12 +40,17 @@ scrape_configs:
   # Redis
   - job_name: 'redis'
     static_configs:
-      - targets: ['redis:6379']
+      - targets: ['redis-exporter:9121']
 
   # PostgreSQL (requires postgres_exporter)
-  # - job_name: 'postgres'
-  #   static_configs:
-  #     - targets: ['postgres-exporter:9187']
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+  
+  #Mongodb
+  - job_name: 'mongodb'
+    static_configs:
+      - targets: ['mongodb-exporter:9216']
 
   # RabbitMQ (if using management plugin with prometheus endpoint)
   - job_name: 'rabbitmq'

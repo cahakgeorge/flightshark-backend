@@ -308,6 +308,81 @@ Manage all the core reference data that powers the platform:
 3. Upload CSV with columns matching the model fields
 4. Review and confirm import
 
+## Data Seeding
+
+The platform includes automated seeding from external data sources to quickly populate reference data.
+
+### API Endpoints for Seeding
+
+All seeding endpoints are under `/admin/data/`:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/admin/data/seed/openflights` | POST | Seed airports, airlines, and routes from OpenFlights.org |
+| `/admin/data/seed/airport-destinations/{code}` | POST | Seed destinations from a specific airport (uses Amadeus) |
+| `/admin/data/seed/all-major-airports` | POST | Seed destinations for all major airports |
+| `/admin/data/seed/popular-routes` | POST | Seed popular routes with pricing data |
+| `/admin/data/sync-status` | GET | View recent sync operations and their status |
+| `/admin/data/airport-destinations/{code}` | GET | View seeded destinations from an airport |
+| `/admin/data/popular-routes` | GET | View seeded popular routes |
+
+### Quick Seed (Recommended)
+
+Seed all reference data from OpenFlights.org (free, no API key needed):
+
+```bash
+# Seed airports, airlines, and routes in one call
+curl -X POST "http://localhost:8000/admin/data/seed/openflights?include_airports=true&include_airlines=true&include_routes=true"
+
+# Check progress
+curl "http://localhost:8000/admin/data/sync-status?limit=1"
+```
+
+This seeds:
+- **~6,000+ airports** worldwide with coordinates
+- **~6,000+ airlines** with active status
+- **~37,000+ routes** with airline information
+
+### Seed from Amadeus (Requires API Key)
+
+For pricing data and real-time route discovery:
+
+```bash
+# Set your Amadeus credentials in .env:
+# AMADEUS_API_KEY=your_key
+# AMADEUS_API_SECRET=your_secret
+# AMADEUS_USE_TEST_API=true  # Use test API for development
+
+# Seed destinations from a specific airport
+curl -X POST "http://localhost:8000/admin/data/seed/airport-destinations/DUB"
+
+# Seed popular routes with pricing
+curl -X POST "http://localhost:8000/admin/data/seed/popular-routes?origins=DUB,LHR,CDG&destinations=BCN,LIS,AMS"
+```
+
+### View Seeded Data
+
+```bash
+# View destinations from Dublin
+curl "http://localhost:8000/admin/data/airport-destinations/DUB"
+
+# View popular routes
+curl "http://localhost:8000/admin/data/popular-routes?origin=DUB"
+```
+
+### Scheduled Seeding (Celery)
+
+Reference data is automatically refreshed by Celery beat:
+- **Weekly** (Sunday 2 AM): Refresh all major airport destinations
+- **Daily** (3:30 AM): Update popular routes with fresh pricing
+
+### Data Sources
+
+| Source | Data | Rate Limits | API Key |
+|--------|------|-------------|---------|
+| **OpenFlights.org** | Airports, airlines, routes | None (static data) | No |
+| **Amadeus** | Real-time pricing, route discovery | Test: 500/month, Prod: varies | Yes |
+
 ## Development
 
 ### Makefile Commands

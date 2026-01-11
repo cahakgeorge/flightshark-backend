@@ -19,6 +19,7 @@ app = Celery(
         "tasks.scraping",
         "tasks.notifications",
         "tasks.analytics",
+        "tasks.reference_data",
     ]
 )
 
@@ -48,6 +49,7 @@ app.conf.update(
     task_annotations={
         "tasks.flight_prices.*": {"rate_limit": "10/m"},  # 10 per minute
         "tasks.scraping.*": {"rate_limit": "5/m"},  # 5 per minute (be nice to APIs)
+        "tasks.reference_data.*": {"rate_limit": "2/m"},  # 2 per minute (heavy API calls)
     },
     
     # Routing
@@ -56,6 +58,7 @@ app.conf.update(
         "tasks.scraping.*": {"queue": "scraping"},
         "tasks.notifications.*": {"queue": "notifications"},
         "tasks.analytics.*": {"queue": "analytics"},
+        "tasks.reference_data.*": {"queue": "reference_data"},
     },
 )
 
@@ -108,6 +111,24 @@ app.conf.beat_schedule = {
         "task": "tasks.analytics.cleanup_old_data",
         "schedule": crontab(hour=4, minute=0, day_of_week=0),  # Sunday 4 AM
         "options": {"queue": "analytics"},
+    },
+    
+    # ==================
+    # Reference Data Tasks
+    # ==================
+    
+    # Update popular routes pricing daily at 3 AM
+    "update-popular-routes-daily": {
+        "task": "tasks.reference_data.update_popular_routes",
+        "schedule": crontab(hour=3, minute=30),
+        "options": {"queue": "reference_data"},
+    },
+    
+    # Refresh all major airport destinations weekly (Sunday 2 AM)
+    "seed-major-airports-weekly": {
+        "task": "tasks.reference_data.seed_all_major_airports",
+        "schedule": crontab(hour=2, minute=0, day_of_week=0),
+        "options": {"queue": "reference_data"},
     },
 }
 

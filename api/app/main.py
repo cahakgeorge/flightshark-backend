@@ -25,7 +25,7 @@ REQUEST_LATENCY = Histogram(
     'HTTP request latency in seconds',
     ['method', 'endpoint']
 )
-from app.routers import auth, flights, trips, destinations, users, health, airports, airlines
+from app.routers import auth, flights, trips, destinations, users, health, airports, airlines, admin_data
 from app.utils.database import init_db, close_db
 from app.utils.redis import init_redis, close_redis
 from app.utils.mongodb import init_mongodb, close_mongodb
@@ -130,6 +130,7 @@ app.include_router(destinations.router, prefix="/destinations", tags=["Destinati
 app.include_router(users.router, prefix="/users", tags=["Users"])
 app.include_router(airports.router, prefix="/airports", tags=["Airports"])
 app.include_router(airlines.router, prefix="/airlines", tags=["Airlines"])
+app.include_router(admin_data.router, prefix="/admin/data", tags=["Admin - Data Seeding"])
 
 
 @app.get("/", include_in_schema=False)

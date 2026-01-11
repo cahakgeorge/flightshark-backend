@@ -57,7 +57,8 @@ class Settings(BaseSettings):
     # Flight APIs
     AMADEUS_API_KEY: str = Field(default="")
     AMADEUS_API_SECRET: str = Field(default="")
-    AMADEUS_BASE_URL: str = Field(default="https://api.amadeus.com/v2")
+    # Use test.api.amadeus.com for sandbox/free tier, api.amadeus.com for production
+    AMADEUS_BASE_URL: str = Field(default="https://test.api.amadeus.com/v2")
     
     SKYSCANNER_API_KEY: str = Field(default="")
     KIWI_API_KEY: str = Field(default="")
